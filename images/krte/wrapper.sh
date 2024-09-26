@@ -20,7 +20,6 @@
 # Things wrapper.sh handles:
 # - starting / stopping docker-in-docker
 # -- configuring the docker daemon for IPv6
-# - confuring bazel caching
 # - activating GCP service account credentials
 # - ensuring GOPATH/bin is in PATH
 #
@@ -31,45 +30,54 @@ set -o errexit
 set -o pipefail
 set -o nounset
 
-echo "wrapper.sh] [INFO] Wrapping Test Command: \`$*\`"
-echo "wrapper.sh] [INFO] Running in: ${IMAGE}"
-echo "wrapper.sh] [INFO] See: https://github.com/kubernetes/test-infra/blob/master/images/krte/wrapper.sh"
-printf '%0.s=' {1..80}; echo
-echo "wrapper.sh] [SETUP] Performing pre-test setup ..."
+>&2 echo "wrapper.sh] [INFO] Wrapping Test Command: \`$*\`"
+>&2 echo "wrapper.sh] [INFO] Running in: ${KRTE_IMAGE}"
+>&2 echo "wrapper.sh] [INFO] See: https://github.com/kubernetes/test-infra/blob/master/images/krte/wrapper.sh"
+printf '%0.s=' {1..80} >&2; echo >&2
+>&2 echo "wrapper.sh] [SETUP] Performing pre-test setup ..."
 
-# Check if the job has opted-in to bazel remote caching and if so generate 
-# .bazelrc entries pointing to the remote cache
-export BAZEL_REMOTE_CACHE_ENABLED=${BAZEL_REMOTE_CACHE_ENABLED:-false}
-if [[ "${BAZEL_REMOTE_CACHE_ENABLED}" == "true" ]]; then
-  echo "wrapper.sh] [SETUP] Bazel remote cache is enabled, generating .bazelrcs ..."
-  /usr/local/bin/create_bazel_cache_rcs.sh
-  echo "wrapper.sh] [SETUP] Done setting up .bazelrcs"
-fi
-
-# optionally enable ipv6 docker
-export DOCKER_IN_DOCKER_IPV6_ENABLED=${DOCKER_IN_DOCKER_IPV6_ENABLED:-false}
-if [[ "${DOCKER_IN_DOCKER_IPV6_ENABLED}" == "true" ]]; then
-  echo "wrapper.sh] [SETUP] Enabling IPv6 in Docker config ..."
-  # configure the daemon with ipv6
-  mkdir -p /etc/docker/
-  cat <<EOF >/etc/docker/daemon.json
-{
-  "ipv6": true,
-  "fixed-cidr-v6": "fc00:db8:1::/64"
+cleanup(){
+  if [[ "${DOCKER_IN_DOCKER_ENABLED:-false}" == "true" ]]; then
+    >&2 echo "wrapper.sh] [CLEANUP] Waiting 30 seconds for pods stopped with terminationGracePeriod:30"
+    sleep 30
+    >&2 echo "wrapper.sh] [CLEANUP] Cleaning up after Docker in Docker ..."
+    docker ps -aq | xargs -r docker rm -f || true
+    >&2 echo "wrapper.sh] [CLEANUP] Waiting for docker to stop for 30 seconds"
+    timeout 30 service docker stop || true
+    >&2 echo "wrapper.sh] [CLEANUP] Done cleaning up after Docker in Docker."
+  fi
 }
-EOF
+
+early_exit_handler() {
+  >&2 echo "wrapper.sh] [EARLY EXIT] Interrupted, entering handler ..."
+  # if we got here before the wrapped command exited, skip, otherwise signal and wait
+  if [ -n "${WRAPPED_COMMAND_PID:-}" ] && [ -z "${EXIT_VALUE:-}" ]; then
+    kill -TERM "$WRAPPED_COMMAND_PID" || true
+    wait $WRAPPED_COMMAND_PID
+    EXIT_VALUE=$?
+    >&2 echo "wrapper.sh] [EARLY EXIT] Exit code was ${EXIT_VALUE}, not preserving due to interrupt signal"
+  # else if we have an exit code because we already waited on the process then debug it
+  elif [ -n "${EXIT_VALUE:-}" ]; then
+    >&2 echo "wrapper.sh] [EARLY EXIT] Original exit code was ${EXIT_VALUE}, not preserving due to interrupt signal"
+  fi
+  cleanup
+  >&2 echo "wrapper.sh] [EARLY EXIT] Completed handler ..."
+  exit 1
+}
+
+trap early_exit_handler TERM INT
+
+# Check if the job has opted-in to docker-in-docker
+export DOCKER_IN_DOCKER_ENABLED=${DOCKER_IN_DOCKER_ENABLED:-false}
+if [[ "${DOCKER_IN_DOCKER_ENABLED}" == "true" ]]; then
+  >&2 echo "wrapper.sh] [SETUP] Docker in Docker enabled, initializing ..."
   # enable ipv6
   sysctl net.ipv6.conf.all.disable_ipv6=0
   sysctl net.ipv6.conf.all.forwarding=1
   # enable ipv6 iptables
   modprobe -v ip6table_nat
-  echo "wrapper.sh] [SETUP] Done enabling IPv6 in Docker config."
-fi
-
-# Check if the job has opted-in to docker-in-docker
-export DOCKER_IN_DOCKER_ENABLED=${DOCKER_IN_DOCKER_ENABLED:-false}
-if [[ "${DOCKER_IN_DOCKER_ENABLED}" == "true" ]]; then
-  echo "wrapper.sh] [SETUP] Docker in Docker enabled, initializing ..."
+  # Fix ulimit issue
+  sed -i 's|ulimit -Hn|ulimit -n|' /etc/init.d/docker || true
   # If we have opted in to docker in docker, start the docker daemon,
   service docker start
   # the service can be started but the docker socket not ready, wait for ready
@@ -96,38 +104,33 @@ mkdir -p "${GOPATH}/bin"
 
 # Authenticate gcloud, allow failures
 if [[ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]]; then
-  echo "wrapper.sh] activating service account from GOOGLE_APPLICATION_CREDENTIALS ..."
+  >&2 echo "wrapper.sh] activating service account from GOOGLE_APPLICATION_CREDENTIALS ..."
   gcloud auth activate-service-account --key-file="${GOOGLE_APPLICATION_CREDENTIALS}" || true
 fi
 
 if git rev-parse --is-inside-work-tree >/dev/null; then
-  echo "wrapper.sh] [SETUP] Setting SOURCE_DATE_EPOCH for build reproducibility ..."
+  >&2 echo "wrapper.sh] [SETUP] Setting SOURCE_DATE_EPOCH for build reproducibility ..."
   # Use a reproducible build date based on the most recent git commit timestamp.
   SOURCE_DATE_EPOCH=$(git log -1 --pretty=%ct)
   export SOURCE_DATE_EPOCH
-  echo "wrapper.sh] [SETUP] exported SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
+  >&2 echo "wrapper.sh] [SETUP] exported SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}"
 fi
 
 # actually run the user supplied command
 printf '%0.s=' {1..80}; echo
-echo "wrapper.sh] [TEST] Running Test Command: \`$*\` ..."
+>&2 echo "wrapper.sh] [TEST] Running Test Command: \`$*\` ..."
 set +o errexit
-"$@"
+"$@" &
+WRAPPED_COMMAND_PID=$!
+wait $WRAPPED_COMMAND_PID
 EXIT_VALUE=$?
 set -o errexit
-echo "wrapper.sh] [TEST] Test Command exit code: ${EXIT_VALUE}"
+>&2 echo "wrapper.sh] [TEST] Test Command exit code: ${EXIT_VALUE}"
 
 # cleanup
-if [[ "${DOCKER_IN_DOCKER_ENABLED}" == "true" ]]; then
-  printf '%0.s=' {1..80}; echo
-  echo "wrapper.sh] [CLEANUP] Cleaning up after docker in docker ..."
-  # NOTE: do not fail on these, prefer preserving test command exit status
-  docker ps -aq | xargs -r docker rm -f || true
-  service docker stop || true
-  echo "wrapper.sh] [CLEANUP] Done cleaning up after docker in docker."
-fi
+cleanup
 
 # preserve exit value from user supplied command
-printf '%0.s=' {1..80}; echo
-echo "wrapper.sh] Exiting ${EXIT_VALUE}"
+printf '%0.s=' {1..80} >&2; echo >&2
+>&2 echo "wrapper.sh] Exiting ${EXIT_VALUE}"
 exit ${EXIT_VALUE}

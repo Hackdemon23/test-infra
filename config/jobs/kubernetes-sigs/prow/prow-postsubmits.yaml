@@ -1,0 +1,36 @@
+postsubmits:
+  kubernetes-sigs/prow:
+  - name: post-prow-test-verify
+    branches:
+      - ^main$
+    cluster: eks-prow-build-cluster
+    decorate: true
+    labels:
+      preset-dind-enabled: "true"
+      preset-kind-volume-mounts: "true"
+    spec:
+      containers:
+      - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-test-infra
+        command:
+        - runner.sh
+        args:
+        - make
+        - test
+        - verify
+        env:
+        # docker-in-docker needs privileged mode
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            # This job is very CPU intensive as building prow images in
+            # parallel
+            cpu: "14"
+            memory: "16Gi"
+          limits:
+            cpu: "14"
+            memory: "16Gi"
+    annotations:
+      testgrid-dashboards: sig-testing-prow-repo
+      testgrid-tab-name: post-test-verify
+      description: Runs 'make test verify' on the prow repo on each commit

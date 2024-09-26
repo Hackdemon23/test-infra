@@ -1,107 +1,125 @@
 presubmits:
   kubernetes-sigs/kubebuilder:
   - name: pull-kubebuilder-test
+    cluster: eks-prow-build-cluster
     decorate: true
     always_run: true
-    optional: true
+    optional: false
     path_alias: sigs.k8s.io/kubebuilder
     branches:
     - ^master$
+    - ^feature/plugins-.+$
     spec:
       containers:
-      - image: golang:1.13
+      - image: public.ecr.aws/docker/library/golang:1.22
         command:
         - ./test.sh
         resources:
+          limits:
+            cpu: 4000m
+            memory: 8Gi
           requests:
             cpu: 4000m
+            memory: 8Gi
     annotations:
       testgrid-dashboards: sig-api-machinery-kubebuilder
       testgrid-tab-name: kubebuilder
-  - name: pull-kubebuilder-e2e-k8s-1-16-2
+  - name: pull-kubebuilder-e2e-k8s-1-29-2
+    cluster: eks-prow-build-cluster
     decorate: true
     always_run: true
-    optional: true
+    optional: false
     path_alias: sigs.k8s.io/kubebuilder
     branches:
-    - ^master$
+      - ^master$
+      - ^feature/plugins-.+$
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        command:
-        # see https://github.com/kubernetes/test-infra/blob/bb41c9ee91b50fffa843e2a6fbc0fe361999f682/config/prow/config.yaml#L590-L613
-        - runner.sh
-        # this MUST be a relative directory with "./" or the runner will fail to find the file
-        - ./test_e2e.sh
-        env:
-        - name: KIND_K8S_VERSION
-          value: "v1.16.2"
-        resources:
-          requests:
-            cpu: 4000m
-        securityContext:
-          privileged: true
+        - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+          command:
+            - runner.sh
+            - ./test_e2e.sh
+          env:
+            - name: KIND_K8S_VERSION
+              value: "v1.29.2"
+          resources:
+            limits:
+              cpu: 4000m
+              memory: 8Gi
+            requests:
+              cpu: 4000m
+              memory: 8Gi
+          securityContext:
+            privileged: true
     annotations:
       testgrid-dashboards: sig-api-machinery-kubebuilder
-      testgrid-tab-name: kubebuilder-e2e-1-16-2
+      testgrid-tab-name: kubebuilder-e2e-1-29-2
     labels:
       preset-dind-enabled: "true"
       preset-kind-volume-mounts: "true"
-  - name: pull-kubebuilder-e2e-k8s-1-15-3
+  - name: pull-kubebuilder-e2e-k8s-1-31-0
+    cluster: eks-prow-build-cluster
     decorate: true
     always_run: true
-    optional: true
+    optional: false
     path_alias: sigs.k8s.io/kubebuilder
     branches:
-    - ^master$
+      - ^master$
+      - ^feature/plugins-.+$
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        command:
-        # see https://github.com/kubernetes/test-infra/blob/bb41c9ee91b50fffa843e2a6fbc0fe361999f682/config/prow/config.yaml#L590-L613
-        - runner.sh
-        # this MUST be a relative directory with "./" or the runner will fail to find the file
-        - ./test_e2e.sh
-        env:
-        - name: KIND_K8S_VERSION
-          value: "v1.15.3"
-        resources:
-          requests:
-            cpu: 4000m
-        securityContext:
-          privileged: true
+        - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+          command:
+            - runner.sh
+            - ./test_e2e.sh
+          env:
+            - name: KIND_K8S_VERSION
+              value: "v1.31.0"
+          resources:
+            limits:
+              cpu: 4000m
+              memory: 8Gi
+            requests:
+              cpu: 4000m
+              memory: 8Gi
+          securityContext:
+            privileged: true
     annotations:
       testgrid-dashboards: sig-api-machinery-kubebuilder
-      testgrid-tab-name: kubebuilder-e2e-1-15-3
+      testgrid-tab-name: kubebuilder-e2e-1-31-0
     labels:
       preset-dind-enabled: "true"
       preset-kind-volume-mounts: "true"
-  - name: pull-kubebuilder-e2e-k8s-1-14-1
+  - name: pull-kubebuilder-e2e-k8s-1-30-0
+    cluster: eks-prow-build-cluster
     decorate: true
     always_run: true
-    optional: true
+    optional: false
     path_alias: sigs.k8s.io/kubebuilder
     branches:
-    - ^master$
+      - ^master$
+      - ^feature/plugins-.+$
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        command:
-        # see https://github.com/kubernetes/test-infra/blob/bb41c9ee91b50fffa843e2a6fbc0fe361999f682/config/prow/config.yaml#L590-L613
-        - runner.sh
-        # this MUST be a relative directory with "./" or the runner will fail to find the file
-        - ./test_e2e.sh
-        env:
-        - name: KIND_K8S_VERSION
-          value: "v1.14.1"
-        resources:
-          requests:
-            cpu: 4000m
-        securityContext:
-          privileged: true
+        - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+          command:
+            - runner.sh
+            - ./test_e2e.sh
+          env:
+            - name: KIND_K8S_VERSION
+              value: "v1.30.0"
+          resources:
+            limits:
+              cpu: 4000m
+              memory: 8Gi
+            requests:
+              cpu: 4000m
+              memory: 8Gi
+          securityContext:
+            privileged: true
     annotations:
       testgrid-dashboards: sig-api-machinery-kubebuilder
-      testgrid-tab-name: kubebuilder-e2e-1-14-2
+      testgrid-tab-name: kubebuilder-e2e-1-30-0
     labels:
       preset-dind-enabled: "true"
       preset-kind-volume-mounts: "true"

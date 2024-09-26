@@ -1,10 +1,11 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
+reviewers:
+- knverey
+- koba1t
+- varshaprasad96
+
 approvers:
-- grodrigues3
-- droot
-- justinsb
-- liujingfang1
-- mengqiy
-- monopole
-- pwittrock
+- knverey
+- koba1t
+- varshaprasad96

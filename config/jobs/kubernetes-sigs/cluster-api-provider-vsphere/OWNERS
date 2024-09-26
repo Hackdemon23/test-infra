@@ -1,9 +1,20 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
+reviewers:
+  - sig-cluster-lifecycle-leads
+  - chrischdi
+  - gab-satchi
+  - killianmuldoon
+  - randomvariable
+  - sbueringer
+  - srm09
+  - yastij
 approvers:
   - sig-cluster-lifecycle-leads
-  - sig-vmware-leads
-  - cluster-api-admins
-  - cluster-api-vsphere-maintainers
-  - figo
-  - akutz
+  - chrischdi
+  - gab-satchi
+  - killianmuldoon
+  - randomvariable
+  - sbueringer
+  - srm09
+  - yastij

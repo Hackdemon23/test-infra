@@ -26,11 +26,11 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	prowapi "k8s.io/test-infra/prow/apis/prowjobs/v1"
-	"k8s.io/test-infra/prow/config/secret"
-	"k8s.io/test-infra/prow/github"
-	"k8s.io/test-infra/prow/jenkins"
-	"k8s.io/test-infra/prow/pod-utils/downwardapi"
+	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
+	"sigs.k8s.io/prow/pkg/config/secret"
+	"sigs.k8s.io/prow/pkg/github"
+	"sigs.k8s.io/prow/pkg/jenkins"
+	"sigs.k8s.io/prow/pkg/pod-utils/downwardapi"
 )
 
 type options struct {
@@ -92,19 +92,19 @@ func sanityCheckFlags(o options) error {
 	if o.githubEndpoint == "" {
 		return fmt.Errorf("empty --github-endpoint")
 	} else if _, err := url.Parse(o.githubEndpoint); err != nil {
-		return fmt.Errorf("bad --github-endpoint provided: %v", err)
+		return fmt.Errorf("bad --github-endpoint provided: %w", err)
 	}
 
 	if o.graphqlEndpoint == "" {
 		return fmt.Errorf("empty --graphql-endpoint")
 	} else if _, err := url.Parse(o.graphqlEndpoint); err != nil {
-		return fmt.Errorf("bad --graphql-endpoint provided: %v", err)
+		return fmt.Errorf("bad --graphql-endpoint provided: %w", err)
 	}
 
 	if o.jenkinsURL == "" {
 		return fmt.Errorf("empty --jenkins-url")
 	} else if _, err := url.Parse(o.jenkinsURL); err != nil {
-		return fmt.Errorf("bad --jenkins-url provided: %v", err)
+		return fmt.Errorf("bad --jenkins-url provided: %w", err)
 	}
 
 	return nil
@@ -128,8 +128,7 @@ func main() {
 		tokens = append(tokens, o.jenkinsBearerTokenFile)
 	}
 
-	secretAgent := &secret.Agent{}
-	if err := secretAgent.Start(tokens); err != nil {
+	if err := secret.Add(tokens...); err != nil {
 		logrus.WithError(err).Fatal("Error starting secrets agent.")
 	}
 
@@ -138,11 +137,11 @@ func main() {
 	if o.jenkinsTokenFile != "" {
 		ac.Basic = &jenkins.BasicAuthConfig{
 			User:     o.jenkinsUserName,
-			GetToken: secretAgent.GetTokenGenerator(o.jenkinsTokenFile),
+			GetToken: secret.GetTokenGenerator(o.jenkinsTokenFile),
 		}
 	} else if o.jenkinsBearerTokenFile != "" {
 		ac.BearerToken = &jenkins.BearerTokenAuthConfig{
-			GetToken: secretAgent.GetTokenGenerator(o.jenkinsBearerTokenFile),
+			GetToken: secret.GetTokenGenerator(o.jenkinsBearerTokenFile),
 		}
 	} else {
 		log.Fatalf("no jenkins auth token provided")
@@ -153,7 +152,10 @@ func main() {
 		log.Fatalf("cannot setup Jenkins client: %v", err)
 	}
 
-	gc := github.NewClient(secretAgent.GetTokenGenerator(o.githubTokenFile), secretAgent.Censor, o.graphqlEndpoint, o.githubEndpoint)
+	gc, err := github.NewClient(secret.GetTokenGenerator(o.githubTokenFile), secret.Censor, o.graphqlEndpoint, o.githubEndpoint)
+	if err != nil {
+		log.Fatalf("failed to construct GitHub client: %v", err)
+	}
 
 	pr, err := gc.GetPullRequest(o.org, o.repo, o.num)
 	if err != nil {
@@ -170,9 +172,10 @@ func main() {
 			BaseSHA: pr.Base.SHA,
 			Pulls: []prowapi.Pull{
 				{
-					Number: pr.Number,
-					Author: pr.User.Login,
-					SHA:    pr.Head.SHA,
+					Number:  pr.Number,
+					Author:  pr.User.Login,
+					SHA:     pr.Head.SHA,
+					HeadRef: pr.Head.Ref,
 				},
 			},
 		},

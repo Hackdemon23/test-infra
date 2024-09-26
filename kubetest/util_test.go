@@ -19,7 +19,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"testing"
 	"time"
@@ -27,7 +26,7 @@ import (
 
 func TestHttpFileScheme(t *testing.T) {
 	expected := "some testdata"
-	tmpfile, err := ioutil.TempFile("", "test_http_file_scheme")
+	tmpfile, err := os.CreateTemp("", "test_http_file_scheme")
 	if err != nil {
 		t.Errorf("Error creating temporary file: %v", err)
 	}
@@ -99,6 +98,55 @@ func TestGetLatestClusterUpTime(t *testing.T) {
 		}
 		if !tc.expectErr && !time.Equal(tc.expectedTime) {
 			t.Errorf("%s: expect time %v, but got %v", tc.name, tc.expectedTime, time)
+		}
+	}
+}
+
+func TestGetGKELatestForMinor(t *testing.T) {
+	cases := []struct {
+		name            string
+		versions        []string
+		backstep        int
+		expectedVersion string
+		expectErr       bool
+	}{
+		{
+			name:            "Latest minor",
+			versions:        []string{"1.25.7-gke.1000", "1.25.8-gke.100", "1.24.3-gke.500", "1.23.3-gke.1000"},
+			backstep:        0,
+			expectedVersion: "1.25.8-gke.100",
+		},
+		{
+			name:            "Penultimate minor",
+			versions:        []string{"1.25.7-gke.1000", "1.24.4-gke.100", "1.24.3-gke.500", "1.23.3-gke.1000"},
+			backstep:        1,
+			expectedVersion: "1.24.4-gke.100",
+		},
+		{
+			name:            "Before the penultimate minor",
+			versions:        []string{"1.25.7-gke.1000", "1.24.4-gke.100", "1.24.3-gke.500", "1.23.3-gke.1000", "1.23.4-gke.800"},
+			backstep:        2,
+			expectedVersion: "1.23.4-gke.800",
+		},
+		{
+			name:            "Too old minor",
+			versions:        []string{"1.25.7-gke.1000", "1.24.4-gke.100", "1.24.3-gke.500", "1.23.3-gke.1000", "1.23.4-gke.800"},
+			backstep:        3,
+			expectedVersion: "",
+			expectErr:       true,
+		},
+	}
+
+	for _, tc := range cases {
+		v, err := getGKELatestForMinor(tc.versions, tc.backstep)
+		if err != nil && !tc.expectErr {
+			t.Errorf("%s: got unexpected error %v", tc.name, err)
+		}
+		if err == nil && tc.expectErr {
+			t.Errorf("%s: expect error but did not get one", tc.name)
+		}
+		if v != tc.expectedVersion {
+			t.Errorf("%s: expect version %s but got %s", tc.name, tc.expectedVersion, v)
 		}
 	}
 }

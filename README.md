@@ -1,13 +1,12 @@
 # test-infra
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/kubernetes/test-infra)](https://goreportcard.com/report/github.com/kubernetes/test-infra)
-[![GoDoc](https://godoc.org/github.com/kubernetes/test-infra?status.svg)](https://godoc.org/github.com/kubernetes/test-infra)
-[![Build status](https://prow.k8s.io/badge.svg?jobs=post-test-infra-bazel)](https://testgrid.k8s.io/sig-testing-misc#post-bazel)
+[![GoDoc](https://godoc.org/k8s.io/test-infra?status.svg)](https://godoc.org/k8s.io/test-infra)
+[![Build status](https://prow.k8s.io/badge.svg?jobs=ci-test-infra-continuous-test)](https://testgrid.k8s.io/sig-testing-misc#continuous)
 
 This repository contains tools and configuration files for the testing and
 automation needs of the Kubernetes project.
 
-Our [architecture diagram](docs/architecture.svg) provides a (wildly out of date [#13063])
+Our [architecture diagram](docs/architecture.svg) provides an (updated [#13063])
 overview of how the different tools and services interact.
 
 ## CI Job Management
@@ -20,7 +19,7 @@ after they have been reviewed. All job configs are located in [`config/jobs`]
 - [Add or update job configs](/config/jobs/README.md#adding-or-updating-jobs)
 - [Delete job configs](/config/jobs/README.md#deleting-jobs)
 - [Test job configs locally](/config/jobs/README.md#testing-jobs-locally)
-- [Trigger jobs on PRs using bot commmands](https://go.k8s.io/bot-commands)
+- [Trigger jobs on PRs using bot commands](https://go.k8s.io/bot-commands)
 
 ## Dashboards
 
@@ -28,7 +27,6 @@ after they have been reviewed. All job configs are located in [`config/jobs`]
 
 - [Testgrid](https://testgrid.k8s.io) shows historical test results over time ([`testgrid`])
 - [Triage](https://go.k8s.io/triage) shows clusters of similar test failures across all jobs ([`triage`](/triage))
-- [velodrome/bigquery-metrics] shows failure and flake metrics for jobs related to [kubernetes/kubernetes] ([`velodrome`], [`metrics`])
 
 ### Job and PR Dashboards
 
@@ -37,12 +35,11 @@ after they have been reviewed. All job configs are located in [`config/jobs`]
 - [PR Status](https://prow.k8s.io/pr) shows what needs to be done to get PRs matching a GitHub Query to merge ([`prow/cmd/tide`])
 - [Tide History](https://prow.k8s.io/tide-history) shows what actions tide has taken over time to trigger tests and merge PRs ([`prow/cmd/tide`])
 - [Tide Status](https://prow.k8s.io/tide) shows what PRs are in tide pools to be tested and merged ([`prow/cmd/tide`])
-- [velodrome/monitoring] shows tide pool and merge metrics ([`velodrome`])
 
 ## Other Tools
 
 - [`boskos`](/boskos) manages pools of resources; our CI leases GCP projects from these pools
-- [`experiment/`](/experiment) is a catchall directory for one-shot tools or scripts
+- [`experiment`](/experiment) is a catchall directory for one-shot tools or scripts
 - [`gcsweb`](/gcsweb) is a UI we use to display test artifacts stored in public GCS buckets
 - [`ghproxy`](/ghproxy) is a GitHub-aware reverse proxy cache to help keep our GitHub API token usage within rate limits
 - [`gopherage`](/gopherage) is a tool for manipulating Go coverage files
@@ -68,12 +65,9 @@ Please see [CONTRIBUTING.MD](CONTRIBUTING.md)
 [`config/jobs`]: /config/jobs
 [`gubernator`]: /gubernator
 [`metrics`]: /metrics
-[`prow`]: /prow
-[`prow/cmd/tide`]: /prow/cmd/tide
-[`prow/cmd/deck`]: /prow/cmd/deck
-[`velodrome`]: /velodrome
+[`prow`]: https://github.com/kubernetes-sigs/prow
+[`prow/cmd/tide`]: https://github.com/kubernetes-sigs/prow/tree/main/cmd/tide
+[`prow/cmd/deck`]: https://github.com/kubernetes-sigs/prow/tree/main/cmd/deck
 [`testgrid`]: /testgrid
 [testgrid.k8s.io]: https://testgrid.k8s.io
 [`triage`]: /triage
-[velodrome/bigquery-metrics]: http://velodrome.k8s.io/dashboard/db/bigquery-metrics?orgId=1
-[velodrome/monitoring]: http://velodrome.k8s.io/dashboard/db/monitoring?orgId=1

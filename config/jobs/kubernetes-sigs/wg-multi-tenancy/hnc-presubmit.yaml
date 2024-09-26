@@ -1,14 +1,22 @@
 presubmits:
-  kubernetes-sigs/multi-tenancy:
+  kubernetes-sigs/hierarchical-namespaces:
   - name: pull-hnc-test
+    cluster: eks-prow-build-cluster
     annotations:
       testgrid-dashboards: wg-multi-tenancy-hnc
       testgrid-tab-name: presubmit-tests
     decorate: true
-    path_alias: sigs.k8s.io/multi-tenancy
-    run_if_changed: "incubator/hnc/.*"
+    path_alias: sigs.k8s.io/hierarchical-namespaces
+    run_if_changed: ".*"
     spec:
       containers:
-      - image: golang:1.13
+      - image: public.ecr.aws/docker/library/golang:1.20
         command:
-        - ./incubator/hnc/hack/ci-test.sh
+        - ./hack/ci-test.sh
+        resources:
+          limits:
+            cpu: 2
+            memory: 4Gi
+          requests:
+            cpu: 2
+            memory: 4Gi

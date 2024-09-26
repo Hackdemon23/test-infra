@@ -17,66 +17,20 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"time"
-
-	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/client"
 )
 
 var (
 	localUpTimeout = flag.Duration("local-up-timeout", 2*time.Minute, "(local only) Time limit between 'local-up-cluster.sh' and a response from the Kubernetes API.")
 )
-
-func removeAllContainers(cli *client.Client) {
-	// list all containers
-	listOptions := types.ContainerListOptions{
-		Quiet: true,
-		All:   true,
-	}
-	containers, err := cli.ContainerList(context.Background(), listOptions)
-	if err != nil {
-		log.Printf("Failed to list containers: %v\n", err)
-		return
-	}
-
-	// reverse sort by Creation time so we delete newest containers first
-	sort.Slice(containers, func(i, j int) bool {
-		return containers[i].Created > containers[j].Created
-	})
-
-	// stop then remove (which implicitly kills) each container
-	duration := time.Second * 1
-	removeOptions := types.ContainerRemoveOptions{
-		RemoveVolumes: true,
-		Force:         true,
-	}
-	for _, container := range containers {
-		log.Printf("Stopping container: %v %s with ID: %s\n",
-			container.Names, container.Image, container.ID)
-		err = cli.ContainerStop(context.Background(), container.ID, &duration)
-		if err != nil {
-			log.Printf("Error stopping container: %v\n", err)
-		}
-
-		log.Printf("Removing container: %v %s with ID: %s\n",
-			container.Names, container.Image, container.ID)
-		err = cli.ContainerRemove(context.Background(), container.ID, removeOptions)
-		if err != nil {
-			log.Printf("Error removing container: %v\n", err)
-		}
-	}
-}
 
 type localCluster struct {
 	tempDir    string
@@ -86,7 +40,7 @@ type localCluster struct {
 var _ deployer = localCluster{}
 
 func newLocalCluster() *localCluster {
-	tempDir, err := ioutil.TempDir("", "kubetest-local")
+	tempDir, err := os.MkdirTemp("", "kubetest-local")
 	if err != nil {
 		log.Fatal("unable to create temp directory")
 	}
@@ -108,7 +62,7 @@ func (n localCluster) getScript(scriptPath string) (string, error) {
 	if _, err := os.Stat(path); err == nil {
 		return path, nil
 	}
-	return "", fmt.Errorf("unable to find script %v in directory %v", scriptPath, cwd)
+	return "", fmt.Errorf("unable to find script %v in directory %s", scriptPath, cwd)
 }
 
 func (n localCluster) Up() error {
@@ -215,31 +169,32 @@ func (n localCluster) TestSetup() error {
 func (n localCluster) Down() error {
 	processes := []string{
 		"cloud-controller-manager",
-		"hyperkube", // remove hyperkube when it is removed from local-up-cluster.sh
 		"kube-controller-manager",
 		"kube-proxy",
 		"kube-scheduler",
 		"kube-apiserver",
 		"kubelet",
 	}
-	// create docker client
-	cli, err := client.NewEnvClient()
-	if err != nil {
-		log.Printf("Docker containers cleanup, unable to create Docker client: %v", err)
-	}
+
+	// Waiting 30 seconds for pods stopped with terminationGracePeriod:30
+	// otherwise pods containers will remain and cannot be deleted before
+	// timeout has expired.
+	time.Sleep(30 * time.Second)
+
 	// make sure all containers are removed
-	removeAllContainers(cli)
+	if err := control.FinishRunning(exec.Command("sh", "-c", `docker ps -aq | xargs -r docker rm -fv`)); err != nil {
+		log.Printf("unable to cleanup containers in docker: %v", err)
+	}
+
 	for _, p := range processes {
 		// -f is required to match against the complete command line
 		// (/proc/pid/cmdline), otherwise process name longer than 15
 		// characters cannot be matched, see https://linux.die.net/man/1/pkill.
-		err = control.FinishRunning(exec.Command("pkill", "-f", p))
-		if err != nil {
+		if err := control.FinishRunning(exec.Command("pkill", "-f", p)); err != nil {
 			log.Printf("unable to kill kubernetes process %q: %v", p, err)
 		}
 	}
-	err = control.FinishRunning(exec.Command("pkill", "etcd"))
-	if err != nil {
+	if err := control.FinishRunning(exec.Command("pkill", "etcd")); err != nil {
 		log.Printf("unable to kill etcd: %v", err)
 	}
 	return nil

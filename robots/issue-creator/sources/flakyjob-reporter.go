@@ -21,7 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"sort"
 	"time"
@@ -103,7 +103,7 @@ func (fjr *FlakyJobReporter) parseFlakyJobs(jsonIn []byte) ([]*FlakyJob, error) 
 	var flakeMap map[string]*FlakyJob
 	err := json.Unmarshal(jsonIn, &flakeMap)
 	if err != nil || flakeMap == nil {
-		return nil, fmt.Errorf("error unmarshaling flaky jobs json: %v", err)
+		return nil, fmt.Errorf("error unmarshaling flaky jobs json: %w", err)
 	}
 	flakyJobs := make([]*FlakyJob, 0, len(flakeMap))
 
@@ -272,11 +272,11 @@ func ReadHTTP(url string) ([]byte, error) {
 		}
 		defer resp.Body.Close()
 
-		body, err := ioutil.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		if err != nil {
 			continue
 		}
 		return body, nil
 	}
-	return nil, fmt.Errorf("ran out of retries reading from '%s'. Last error was %v", url, err)
+	return nil, fmt.Errorf("ran out of retries reading from '%s'. Last error was %w", url, err)
 }

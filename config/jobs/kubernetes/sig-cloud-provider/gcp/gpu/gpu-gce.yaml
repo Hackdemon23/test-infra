@@ -2,15 +2,21 @@ presets:
 - labels:
     preset-ci-gce-device-plugin-gpu: "true"
   env:
-  - name: KUBE_GCE_NODE_IMAGE
-    value: gke-1134-gke-rc5-cos-69-10895-138-0-v190320-pre-nvda-gpu
-  - name: KUBE_GCE_NODE_PROJECT
-    value: gke-node-images
   - name: NODE_ACCELERATORS
-    value: type=nvidia-tesla-k80,count=2
+    value: type=nvidia-tesla-t4,count=2
+  - name: NODE_SIZE
+    value: n1-standard-2
+- labels:
+    preset-ci-gce-device-plugin-gpu-nvidia-t4: "true"
+  env:
+  - name: NODE_ACCELERATORS
+    value: type=nvidia-tesla-t4,count=2
+  - name: NODE_SIZE
+    value: n1-standard-2
 
 periodics:
 - name: ci-kubernetes-e2e-gce-device-plugin-gpu
+  cluster: k8s-infra-prow-build
   cron: "30 1-23/2 * * *"
   labels:
     preset-service-account: "true"
@@ -18,27 +24,43 @@ periodics:
     preset-ci-gce-device-plugin-gpu: "true"
   annotations:
     fork-per-release: "true"
-    fork-per-release-generic-suffix: "true"
-    fork-per-release-cron: 0 0-23/2 * * *, 0 3-23/6 * * *, 0 8-23/12 * * *, 0 8-23/24 * * *
+    fork-per-release-replacements: "--extract=ci/fast/latest-fast -> --extract=ci/latest-{{.Version}}"
+    fork-per-release-cron: 0 0-23/2 * * *, 0 3-23/6 * * *, 0 8-23/12 * * *, 0 8-23/24 * * *, 0 14-23/24 * * *
     testgrid-dashboards: sig-release-master-blocking, google-gce
     testgrid-tab-name: gce-device-plugin-gpu-master
     testgrid-alert-email: gke-kubernetes-accelerators-bugs@google.com
     description: "Uses kubetest to run e2e tests (+Feature:GPUDevicePlugin) against a cluster created with cluster/kube-up.sh"
-    testgrid-num-failures-to-alert: '12'
+    testgrid-num-failures-to-alert: '6'
     testgrid-alert-stale-results-hours: '24'
+  decorate: true
+  decoration_config:
+    timeout: 300m
   spec:
     containers:
-    - args:
-      - --timeout=300
-      - --bare
-      - --scenario=kubernetes_e2e
-      - --
+    - command:
+      - runner.sh
+      - /workspace/scenarios/kubernetes_e2e.py
+      args:
       - --check-leaked-resources
-      - --extract=ci/latest
+      - --extract=ci/fast/latest-fast
+      - --extract-ci-bucket=k8s-release-dev
+      # Note: The GCE Node image used may have a dependency on the nvidia-driver-installer image defined in https://github.com/kubernetes/kubernetes/blob/master/test/e2e/testing-manifests/scheduling/nvidia-driver-installer.yaml
+      # If updating the image defined here, the cos-gpu-installer image may need to updated to support the corresponding COS image.
+      - --env=KUBE_GCE_NODE_IMAGE=cos-109-17800-147-22
       - --gcp-node-image=gci
+      - --gcp-nodes=2
       - --gcp-project-type=gpu-project
       - --gcp-zone=us-west1-b
       - --provider=gce
       - --test_args=--ginkgo.focus=\[Feature:GPUDevicePlugin\] --minStartupPods=8
       - --timeout=180m
-      image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+      # TODO: drop this once it's in the defaults
+      - --env=LOG_DUMP_SYSTEMD_SERVICES=containerd
+      image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+      resources:
+        limits:
+          cpu: 1
+          memory: 3Gi
+        requests:
+          cpu: 1
+          memory: 3Gi

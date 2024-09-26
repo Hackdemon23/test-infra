@@ -1,0 +1,17 @@
+# See the OWNERS docs at https://go.k8s.io/owners
+
+reviewers:
+  - ahrtr
+  - ivanvc
+  - jmhbnz
+  - serathius
+  - wenjiaswe
+
+approvers:
+  - ahrtr
+  - jmhbnz
+  - serathius
+  - wenjiaswe
+
+labels:
+  - sig/etcd

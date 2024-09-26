@@ -1,6 +1,15 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
-approvers:
-- awly
+reviewers:
 - mikedanese
-- calebmiles
+- jpbetz
+- jprzychodzen
+approvers:
+- mikedanese
+- jpbetz
+- jprzychodzen
+emeritus_approvers:
+- amwat
+labels:
+- sig/cloud-provider
+- area/provider/gcp

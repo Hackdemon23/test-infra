@@ -4,18 +4,28 @@ presubmits:
 
   # kinder presubmits
   - name: pull-kubeadm-kinder-verify
-    path_alias: "k8s.io/kubeadm"
+    cluster: eks-prow-build-cluster
     decorate: true
+    optional: false
+    path_alias: "k8s.io/kubeadm"
     run_if_changed: '^kinder\/.*$'
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+      - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
         command:
         - "./kinder/hack/verify-all.sh"
+        resources:
+          requests:
+            cpu: "2"
+            memory: "9Gi"
+          limits:
+            cpu: "2"
+            memory: "9Gi"
 
-  - name: pull-kubeadm-kinder-upgrade-master
-    optional: false
+  - name: pull-kubeadm-kinder-upgrade-latest
+    cluster: eks-prow-build-cluster
     decorate: true
+    optional: false
     run_if_changed: '^kinder\/.*$'
     skip_branches:
     - release-\d+\.\d+ # revisit once the k/kubeadm repo has branches
@@ -31,35 +41,18 @@ presubmits:
       path_alias: k8s.io/kubernetes
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+      - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
         command:
         - runner.sh
         - "../kubeadm/kinder/ci/kinder-run.sh"
         args:
-        - "presubmit-upgrade-master"
+        - "presubmit-upgrade-latest"
         securityContext:
           privileged: true
         resources:
           requests:
-            memory: "9000Mi"
-            cpu: 2000m
-
-  # operator presubmits
-  - name: pull-kubeadm-operator-verify
-    path_alias: "k8s.io/kubeadm"
-    decorate: true
-    run_if_changed: '^operator\/.*$'
-    labels:
-      preset-dind-enabled: "true"
-    spec:
-      containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        command:
-        - runner.sh
-        - "./operator/hack/verify-all.sh"
-        securityContext:
-          privileged: true
-        resources:
-          requests:
-            memory: "9000Mi"
-            cpu: 2000m
+            cpu: "2"
+            memory: "9Gi"
+          limits:
+            cpu: "2"
+            memory: "9Gi"

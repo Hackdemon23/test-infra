@@ -1,0 +1,20 @@
+# See the OWNERS docs: https://www.kubernetes.dev/docs/guide/owners
+
+reviewers:
+- cpanato
+- Gacko
+- puerco
+- rikatz
+- strongjz
+- tao12345666333
+
+approvers:
+- cpanato
+- Gacko
+- puerco
+- rikatz
+- strongjz
+- tao12345666333
+
+labels:
+- sig/network

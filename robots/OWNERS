@@ -1,9 +1,13 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
+reviewers:
+- cjwagner
+- stevekuznetsov
 approvers:
 - cjwagner
-- fejta
 - stevekuznetsov
+emeritus_approvers:
+- fejta
 
 labels:
 - area/robots

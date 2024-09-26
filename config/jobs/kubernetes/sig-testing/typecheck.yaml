@@ -1,6 +1,7 @@
 presubmits:
   kubernetes/kubernetes:
   - name: pull-kubernetes-typecheck
+    cluster: eks-prow-build-cluster
     path_alias: "k8s.io/kubernetes"
     decorate: true
     always_run: true
@@ -18,10 +19,17 @@ presubmits:
       - name: main
         command:
         - make
-        image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+        image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+        resources:
+          limits:
+            cpu: 5
+            memory: 32Gi
+          requests:
+            cpu: 5
+            memory: 32Gi
         args:
         - verify
         env:
         # Space separated list of the checks to run
         - name: WHAT
-          value: typecheck typecheck-providerless
+          value: typecheck

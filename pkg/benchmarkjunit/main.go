@@ -17,9 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"bytes"
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
+	"io"
+	"os"
 	"os/exec"
 
 	"github.com/sirupsen/logrus"
@@ -46,7 +48,7 @@ func main() {
 		},
 	}
 	cmd.Flags().StringVarP(&opts.outputFile, "output", "o", "-", "output file")
-	cmd.Flags().StringVarP(&opts.logFile, "log-file", "l", "", "optional output file for complete go test output")
+	cmd.Flags().StringVarP(&opts.logFile, "log-file", "l", "", "optional output file for complete go test output. Use '-' to stream output to Stdout.")
 	cmd.Flags().StringVar(&opts.benchRegexp, "bench", ".", "The regexp to pass to the -bench 'go test' flag to select benchmarks to run.")
 	cmd.Flags().StringSliceVar(&opts.extraTestArgs, "test-arg", nil, "additional args for go test")
 	cmd.Flags().StringVar(&opts.goBinaryPath, "go", "go", "The location of the go binary. This flag is primarily intended for use with bazel.")
@@ -66,12 +68,24 @@ func run(opts *options, args []string) {
 	testCmd := exec.Command(opts.goBinaryPath, testArgs...)
 
 	logrus.Infof("Running command %q...", append([]string{opts.goBinaryPath}, testArgs...))
-	testOutput, testErr := testCmd.CombinedOutput()
+	var testOutput []byte
+	var testErr error
+	if opts.logFile == "-" {
+		// Stream command output to stdout.
+		var buf bytes.Buffer
+		writer := io.MultiWriter(os.Stdout, &buf)
+		testCmd.Stdout = writer
+		testCmd.Stderr = writer
+		testErr = testCmd.Run()
+		testOutput = buf.Bytes()
+	} else {
+		testOutput, testErr = testCmd.CombinedOutput()
+	}
 	if testErr != nil {
 		logrus.WithError(testErr).Error("Error(s) executing benchmarks.")
 	}
-	if len(opts.logFile) > 0 {
-		if err := ioutil.WriteFile(opts.logFile, testOutput, 0666); err != nil {
+	if len(opts.logFile) > 0 && opts.logFile != "-" {
+		if err := os.WriteFile(opts.logFile, testOutput, 0666); err != nil {
 			logrus.WithError(err).Fatalf("Failed to write to log file %q.", opts.logFile)
 		}
 	}
@@ -92,7 +106,7 @@ func run(opts *options, args []string) {
 	if opts.outputFile == "-" {
 		fmt.Println(string(junitBytes))
 	} else {
-		if err := ioutil.WriteFile(opts.outputFile, junitBytes, 0666); err != nil {
+		if err := os.WriteFile(opts.outputFile, junitBytes, 0666); err != nil {
 			logrus.WithError(err).Fatalf("Failed to write JUnit to output file %q.", opts.outputFile)
 		}
 	}

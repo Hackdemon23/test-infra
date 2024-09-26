@@ -25,24 +25,26 @@ import (
 
 	"github.com/sirupsen/logrus"
 
-	"k8s.io/test-infra/prow/config/secret"
-	"k8s.io/test-infra/prow/flagutil"
 	"k8s.io/test-infra/robots/pr-creator/updater"
+	"sigs.k8s.io/prow/pkg/flagutil"
 )
 
 type options struct {
 	github flagutil.GitHubOptions
 
-	branch  string
-	confirm bool
-	local   bool
-	org     string
-	repo    string
-	source  string
+	branch    string
+	allowMods bool
+	confirm   bool
+	local     bool
+	org       string
+	repo      string
+	source    string
 
 	title      string
+	headBranch string
 	matchTitle string
 	body       string
+	labels     string
 }
 
 func (o options) validate() error {
@@ -64,6 +66,13 @@ func (o options) validate() error {
 	return nil
 }
 
+func (o options) getLabels() []string {
+	if o.labels != "" {
+		return strings.Split(o.labels, ",")
+	}
+	return nil
+}
+
 func optionsFromFlags() options {
 	var o options
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
@@ -73,11 +82,14 @@ func optionsFromFlags() options {
 	fs.StringVar(&o.branch, "branch", "", "Repo branch to merge into")
 	fs.StringVar(&o.source, "source", "", "The user:branch to merge from")
 
+	fs.BoolVar(&o.allowMods, "allow-mods", updater.PreventMods, "Indicates whether maintainers can modify the pull request")
 	fs.BoolVar(&o.confirm, "confirm", false, "Set to mutate github instead of a dry run")
 	fs.BoolVar(&o.local, "local", false, "Allow source to be local-branch instead of remote-user:branch")
 	fs.StringVar(&o.title, "title", "", "Title of PR")
-	fs.StringVar(&o.matchTitle, "match-title", "", "Reuse any self-authored, open PR matching title")
+	fs.StringVar(&o.headBranch, "head-branch", "", "Reuse any self-authored open PR from this branch. This takes priority over match-title")
+	fs.StringVar(&o.matchTitle, "match-title", "", "Reuse any self-autohred open PR that matches this title. If both this and head-branch are set, this will be overwritten by head-branch")
 	fs.StringVar(&o.body, "body", "", "Body of PR")
+	fs.StringVar(&o.labels, "labels", "", "labels to attach to PR")
 	fs.Parse(os.Args[1:])
 	return o
 }
@@ -88,17 +100,19 @@ func main() {
 		logrus.WithError(err).Fatal("bad flags")
 	}
 
-	jamesBond := &secret.Agent{}
-	if err := jamesBond.Start([]string{o.github.TokenPath}); err != nil {
-		logrus.WithError(err).Fatal("Failed to start secrets agent")
-	}
-
-	gc, err := o.github.GitHubClient(jamesBond, !o.confirm)
+	gc, err := o.github.GitHubClient(!o.confirm)
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to create github client")
 	}
 
-	n, err := updater.EnsurePR(o.org, o.repo, o.title, o.body, o.source, o.branch, o.matchTitle, gc)
+	var queryTokensString string
+	// Prioritize using headBranch as it is less flakey
+	if o.headBranch != "" {
+		queryTokensString = "head:" + o.headBranch
+	} else {
+		queryTokensString = "in:title " + o.matchTitle
+	}
+	n, err := updater.EnsurePRWithQueryTokensAndLabels(o.org, o.repo, o.title, o.body, o.source, o.branch, queryTokensString, o.allowMods, o.getLabels(), gc)
 	if err != nil {
 		logrus.WithError(err).Fatal("Failed to ensure PR exists.")
 	}

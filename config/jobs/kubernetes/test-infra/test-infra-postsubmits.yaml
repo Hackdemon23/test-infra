@@ -1,23 +1,37 @@
 postsubmits:
   kubernetes/test-infra:
-  - name: post-test-infra-bazel
+  - name: post-test-infra-test-all
+    cluster: eks-prow-build-cluster
     branches:
     - master
     decorate: true
     labels:
       preset-service-account: "true"
-      preset-bazel-scratch-dir: "true"
+      preset-dind-enabled: "true"
+      preset-kind-volume-mounts: "true"
     spec:
       containers:
-      - image: launcher.gcr.io/google/bazel:0.29.1
+      - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-test-infra
         command:
-        - hack/bazel.sh
+        - runner.sh
         args:
+        - make
         - test
-        - --config=ci
-        - --nobuild_tests_only
-        - //...
+        - verify
+        env:
+        # docker-in-docker needs privileged mode
+        securityContext:
+          privileged: true
+        resources:
+          requests:
+            # This job is very CPU intensive as building prow images in
+            # parallel
+            cpu: "14"
+            memory: "16Gi"
+          limits:
+            cpu: "14"
+            memory: "16Gi"
     annotations:
       testgrid-dashboards: sig-testing-misc
-      testgrid-tab-name: post-bazel
-      description: Runs bazel test //... on the test-infra repo on each commit
+      testgrid-tab-name: post-test-all
+      description: Runs 'make test verify' on the test-infra repo on each commit

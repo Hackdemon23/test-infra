@@ -1,4 +1,4 @@
-# GCB Builder
+# image-builder
 
 This builder is sugar on top of `gcloud builds submit`. It offers the following features:
 
@@ -15,7 +15,7 @@ and `cloudbuild.yaml`. For example, a subset of the `kubekins-e2e` variants look
 variants:
   '1.16':
     CONFIG: '1.16'
-    GO_VERSION: 1.13.4
+    GO_VERSION: 1.13.5
     K8S_RELEASE: stable-1.16
     BAZEL_VERSION: 0.23.2
   '1.15':
@@ -36,7 +36,7 @@ beyond `_GIT_TAG`.
 ## Usage
 
 ```shell
-bazel run //images/builder -- [options] path/to/build-directory/
+go run ./images/builder [options] path/to/build-directory/
 ```
 
 - `--allow-dirty`: If true, allow pushing dirty builds.
@@ -48,15 +48,21 @@ bazel run //images/builder -- [options] path/to/build-directory/
 - `--build-dir`: If provided, this directory will be uploaded as the source for the Google Cloud Build run.
 - `--gcb-config`: If provided, this will be used as the name of the Google Cloud Build config file.
 - `--no-source`: If true, no source will be uploaded with this build.
+- `--with-git-dir`: If true, upload the .git directory to GCB, so we can e.g. get the git log and tag.
 
 ### A note about logging in Prow
 
-Prow job logs can be viewed at a URI constructed as follows: `https://prow.k8s.io/view/gcs/kubernetes-jenkins/logs/<job-name>/<job-number>` e.g., https://prow.k8s.io/view/gcs/kubernetes-jenkins/logs/ci-kubernetes-prototype-build/1187171788975509509
+Prow job logs can be viewed at a URI constructed as follows:
+`https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/<job-name>/<job-number>` e.g.,
+https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/ci-kubernetes-prototype-build/1187171788975509509
 
-When `--log-dir` is specified (which is the default case when running in Prow), the GCB build logs will be written to a set of log files, based on the variant(s).
+When `--log-dir` is specified (which is the default case when running in Prow),
+the GCB build logs will be written to a set of log files, based on the variant(s).
 
 For example:
 - No variant --> `build.log` (https://storage.googleapis.com/kubernetes-jenkins/logs/post-release-push-image-k8s-cloud-builder/1186437931728900096/artifacts/build.log)
 - Variant: `build-ci` --> `build-ci.log` (https://storage.googleapis.com/kubernetes-jenkins/logs/ci-kubernetes-prototype-build/1187156434249322500/artifacts/build-ci.log)
 
-For single-variant jobs where the preference is to log directly to stdout (so that the log is instead visible in `https://prow.k8s.io/view/gcs/kubernetes-jenkins/logs/<job-name>/<job-number>`), `LOG_TO_STDOUT="y"` can be specified.
+For single-variant jobs where the preference is to log directly to stdout (so
+that the log is instead visible in `https://prow.k8s.io/view/gs/kubernetes-jenkins/logs/<job-name>/<job-number>`),
+`LOG_TO_STDOUT="y"` can be specified.

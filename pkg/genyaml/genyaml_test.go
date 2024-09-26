@@ -19,12 +19,13 @@ package genyaml
 import (
 	"bytes"
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	yaml3 "gopkg.in/yaml.v3"
+
 	simplealiases "k8s.io/test-infra/pkg/genyaml/testdata/alias_simple_types"
 	aliases "k8s.io/test-infra/pkg/genyaml/testdata/alias_types"
 	embedded "k8s.io/test-infra/pkg/genyaml/testdata/embedded_structs"
@@ -37,6 +38,7 @@ import (
 	pointers "k8s.io/test-infra/pkg/genyaml/testdata/pointer_types"
 	primitives "k8s.io/test-infra/pkg/genyaml/testdata/primitive_types"
 	private "k8s.io/test-infra/pkg/genyaml/testdata/private_members"
+	sequence "k8s.io/test-infra/pkg/genyaml/testdata/sequence_items"
 )
 
 const (
@@ -48,9 +50,13 @@ func resolvePath(t *testing.T, filename string) string {
 	return strings.ToLower(filepath.Join(testDir, name, filename))
 }
 
-func readFile(t *testing.T, extension string) []byte {
+func fileName(t *testing.T, extension string) string {
 	name := filepath.Base(t.Name())
-	data, err := ioutil.ReadFile(strings.ToLower(filepath.Join(testDir, name, name+"."+extension)))
+	return strings.ToLower(filepath.Join(testDir, name, name+"."+extension))
+}
+
+func readFile(t *testing.T, extension string) []byte {
+	data, err := os.ReadFile(fileName(t, extension))
 	if err != nil {
 		t.Errorf("Failed reading .%s file: %v.", extension, err)
 	}
@@ -92,8 +98,8 @@ third line`,
 			expected: `"Some comment"`,
 		},
 		{
-			name: "Convert tab to space",
-			rawDoc: "tab	tab		tabtab",
+			name:     "Convert tab to space",
+			rawDoc:   "tab	tab		tabtab",
 			expected: "tab tab tabtab",
 		},
 		{
@@ -187,10 +193,12 @@ func TestInjectComment(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			cm := NewCommentMap()
-
-			err := json.Unmarshal(readFile(t, "json"), &cm.comments)
+			cm, err := NewCommentMap(nil)
 			if err != nil {
+				t.Fatalf("Failed to construct comment map: %v", err)
+			}
+
+			if err := json.Unmarshal(readFile(t, "json"), &cm.comments); err != nil {
 				t.Errorf("Unexpected error unmarshalling JSON to comments: %v.", err)
 			}
 
@@ -233,65 +241,14 @@ func TestAddPath(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			cm := NewCommentMap()
-
-			for _, f := range test.paths {
-				cm.AddPath(resolvePath(t, f))
+			var resolved []string
+			for _, file := range test.paths {
+				resolved = append(resolved, resolvePath(t, file))
 			}
-
-			expectedComments := readFile(t, "json")
-			actualComments, err := json.MarshalIndent(cm.comments, "", "  ")
-
+			cm, err := NewCommentMap(nil, resolved...)
 			if err != nil {
-				t.Errorf("Unexpected error generating JSON from comments: %v.", err)
+				t.Fatalf("failed to construct comment map: %v", err)
 			}
-
-			equal := bytes.Equal(expectedComments, actualComments)
-
-			if equal != test.expected {
-				t.Errorf("Expected comments equality to be: %t.", test.expected)
-			}
-		})
-	}
-
-}
-
-func TestSetPath(t *testing.T) {
-	tests := []struct {
-		name     string
-		setup    func(cm *CommentMap)
-		path     string
-		expected bool
-	}{
-		{
-			name: "Single path",
-			setup: func(cm *CommentMap) {
-				cm.comments = make(map[string]map[string]Comment)
-			},
-			path:     "example_config.go",
-			expected: true,
-		},
-		{
-			name: "Set path overwrite",
-			setup: func(cm *CommentMap) {
-				cm.comments["dummy_key"] = make(map[string]Comment)
-				cm.comments["dummy_key"]["dummy_sub_key"] = Comment{
-					Type:  "string",
-					IsObj: false,
-					Doc:   "Some preloaded comments",
-				}
-			},
-			path:     "example_config.go",
-			expected: true,
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			cm := NewCommentMap()
-			test.setup(cm)
-
-			cm.SetPath(resolvePath(t, test.path))
 
 			expectedComments := readFile(t, "json")
 			actualComments, err := json.MarshalIndent(cm.comments, "", "  ")
@@ -312,26 +269,50 @@ func TestSetPath(t *testing.T) {
 
 func TestGenYAML(t *testing.T) {
 	tests := []struct {
-		name      string
-		structObj interface{}
-		expected  bool
+		name            string
+		paths           []string
+		rawContents     map[string][]byte
+		structObj       interface{}
+		expectedRawYaml []byte
+		expected        bool
 	}{
 		{
-			name: "alias types",
+			name:  "alias types",
+			paths: []string{"example_config.go"},
 			structObj: &aliases.Alias{
 				StringField: "string",
 			},
 			expected: true,
 		},
 		{
-			name: "alias simple types",
+			name: "also-read-raw",
+			rawContents: map[string][]byte{
+				"alias_types.yaml": []byte(`package alias_types
+type Alias = AliasedType
+type AliasedType struct {
+  // StringField comment
+  StringField string ` + "`json:\"string\"`" + `
+}`),
+			},
+			structObj: &aliases.Alias{
+				StringField: "string",
+			},
+			expectedRawYaml: []byte(`# StringField comment
+string: string
+`),
+			expected: true,
+		},
+		{
+			name:  "alias simple types",
+			paths: []string{"example_config.go"},
 			structObj: &simplealiases.SimpleAliases{
 				AliasField: simplealiases.Alias("string"),
 			},
 			expected: true,
 		},
 		{
-			name: "primitive types",
+			name:  "primitive types",
+			paths: []string{"example_config.go"},
 			structObj: &primitives.Primitives{
 				StringField:  "string",
 				BooleanField: true,
@@ -340,7 +321,8 @@ func TestGenYAML(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "multiline comments",
+			name:  "multiline comments",
+			paths: []string{"example_config.go"},
 			structObj: &multiline.Multiline{
 				StringField1: "string1",
 				StringField2: "string2",
@@ -352,7 +334,8 @@ func TestGenYAML(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "nested structs",
+			name:  "nested structs",
+			paths: []string{"example_config.go"},
 			structObj: &nested.Parent{
 				Age: 35,
 				Children: []nested.Child{
@@ -364,7 +347,8 @@ func TestGenYAML(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "inline structs",
+			name:  "inline structs",
+			paths: []string{"example_config.go"},
 			structObj: &inlines.Resource{
 				Metadata: inlines.Metadata{
 					Name: "test",
@@ -373,7 +357,8 @@ func TestGenYAML(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "embedded structs",
+			name:  "embedded structs",
+			paths: []string{"example_config.go"},
 			structObj: &embedded.Building{
 				Address:  "123 North Main Street",
 				Bathroom: embedded.Bathroom{Width: 100, Height: 200},
@@ -382,7 +367,8 @@ func TestGenYAML(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "no tags",
+			name:  "no tags",
+			paths: []string{"example_config.go"},
 			structObj: &tags.Tagless{
 				StringField:  "string",
 				BooleanField: true,
@@ -391,7 +377,8 @@ func TestGenYAML(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "omit if empty",
+			name:  "omit if empty",
+			paths: []string{"example_config.go"},
 			structObj: &omit.OmitEmptyStrings{
 				StringFieldOmitEmpty: "",
 				StringFieldKeepEmpty: "",
@@ -401,7 +388,8 @@ func TestGenYAML(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "pointer types",
+			name:  "pointer types",
+			paths: []string{"example_config.go"},
 			structObj: &pointers.Zoo{
 				Employees: []*pointers.Employee{
 					{
@@ -418,11 +406,30 @@ func TestGenYAML(t *testing.T) {
 		},
 		{
 			name:      "private members",
+			paths:     []string{"example_config.go"},
 			structObj: private.NewPerson("gamer123", "password123"),
 			expected:  true,
 		},
 		{
-			name: "interface types",
+			name:  "sequence items",
+			paths: []string{"example_config.go"},
+			structObj: &sequence.Recipe{
+				Ingredients: []sequence.Ingredient{
+					{
+						Name:   "potatoes",
+						Amount: 1,
+					},
+					{
+						Name:   "eggs",
+						Amount: 2,
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name:  "interface types",
+			paths: []string{"example_config.go"},
 			structObj: &interfaces.Zoo{
 				Animals: []interfaces.Animal{
 					&interfaces.Lion{
@@ -440,8 +447,18 @@ func TestGenYAML(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			cm := NewCommentMap(resolvePath(t, "example_config.go"))
-			expectedYaml := readFile(t, "yaml")
+			var paths []string
+			for _, path := range test.paths {
+				paths = append(paths, resolvePath(t, path))
+			}
+			cm, err := NewCommentMap(test.rawContents, paths...)
+			if err != nil {
+				t.Fatalf("failed to construct comment map: %v", err)
+			}
+			expectedYaml := test.expectedRawYaml
+			if len(expectedYaml) == 0 {
+				expectedYaml = readFile(t, "yaml")
+			}
 
 			actualYaml, err := cm.GenYaml(test.structObj)
 

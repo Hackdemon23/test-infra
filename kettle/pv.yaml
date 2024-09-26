@@ -1,18 +1,10 @@
-kind: PersistentVolume
-apiVersion: v1
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
 metadata:
-  labels:
-    app: kettle
-  name: kettle-data
-spec:
-  capacity:
-    storage: 500Gi
-  accessModes:
-    - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Retain
-  gcePersistentDisk:
-    pdName: kettle-data
-    fsType: ext4
+  name: ssd
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: pd-ssd
 ---
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -20,11 +12,11 @@ metadata:
   labels:
     app: kettle
   name: kettle-data
+  namespace: kettle
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 500Gi
+      storage: 3001Gi
   storageClassName: ssd
-  volumeName: kettle-data

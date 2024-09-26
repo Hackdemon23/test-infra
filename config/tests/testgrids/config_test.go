@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/mail"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -31,7 +32,12 @@ import (
 
 	"github.com/GoogleCloudPlatform/testgrid/config"
 	config_pb "github.com/GoogleCloudPlatform/testgrid/pb/config"
-	prow_config "k8s.io/test-infra/prow/config"
+	"k8s.io/test-infra/testgrid/pkg/configurator/configurator"
+	"k8s.io/test-infra/testgrid/pkg/configurator/options"
+	prow_config "sigs.k8s.io/prow/pkg/config"
+	"sigs.k8s.io/prow/pkg/flagutil"
+
+	configflagutil "sigs.k8s.io/prow/pkg/flagutil/config"
 )
 
 type SQConfig struct {
@@ -40,25 +46,31 @@ type SQConfig struct {
 
 var (
 	companies = []string{
+		"amazon",
 		"canonical",
 		"cos",
+		"containerd",
 		"cri-o",
 		"istio",
 		"googleoss",
 		"google",
 		"kopeio",
 		"redhat",
+		"ibm",
 		"vmware",
 		"gardener",
 		"jetstack",
-		"kyma",
+		"kubevirt",
 	}
 	orgs = []string{
 		"conformance",
+		"kops",
 		"presubmits",
 		"sig",
 		"wg",
 		"provider",
+		"kubernetes-clients",
+		"kcp",
 	}
 	dashboardPrefixes = [][]string{orgs, companies}
 
@@ -66,27 +78,70 @@ var (
 	prowGcsPrefixes = []string{
 		"kubernetes-jenkins/logs/",
 		"kubernetes-jenkins/pr-logs/directory/",
+		"kubernetes-ci-logs/logs/",
+		"kubernetes-ci-logs/pr-logs/directory/",
 	}
 )
 
+var defaultInputs options.MultiString = []string{"../../testgrids"}
 var prowPath = flag.String("prow-config", "../../../config/prow/config.yaml", "Path to prow config")
 var jobPath = flag.String("job-config", "../../jobs", "Path to prow job config")
+var defaultYAML = flag.String("default", "../../testgrids/default.yaml", "Default yaml for testgrid")
+var inputs options.MultiString
 var protoPath = flag.String("config", "", "Path to TestGrid config proto")
 
 // Shared testgrid config, loaded at TestMain.
 var cfg *config_pb.Configuration
 
+// Shared prow config, loaded at Test Main
+var prowConfig *prow_config.Config
+
 func TestMain(m *testing.M) {
+	flag.Var(&inputs, "yaml", "comma-separated list of input YAML files or directories")
 	flag.Parse()
 	if *protoPath == "" {
-		fmt.Println("--config must be set")
-		os.Exit(1)
+		if len(inputs) == 0 {
+			inputs = defaultInputs
+		}
+		// Generate proto from testgrid config
+		tmpDir, err := os.MkdirTemp("", "testgrid-config-test")
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+		defer os.RemoveAll(tmpDir)
+		tmpFile := path.Join(tmpDir, "test-proto")
+
+		opt := options.Options{
+			Inputs: inputs,
+			ProwConfig: configflagutil.ConfigOptions{
+				ConfigPath:    *prowPath,
+				JobConfigPath: *jobPath,
+			},
+			DefaultYAML:     *defaultYAML,
+			Output:          flagutil.NewStringsBeenSet(tmpFile),
+			Oneshot:         true,
+			StrictUnmarshal: true,
+		}
+
+		if err := configurator.RealMain(&opt); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+
+		protoPath = &tmpFile
 	}
 
 	var err error
-	cfg, err = config.Read(*protoPath, context.Background(), nil)
+	cfg, err = config.Read(context.Background(), *protoPath, nil)
 	if err != nil {
-		fmt.Printf("Could not load config: %v", err)
+		fmt.Printf("Could not load config: %v\n", err)
+		os.Exit(1)
+	}
+
+	prowConfig, err = prow_config.Load(*prowPath, *jobPath, nil, "")
+	if err != nil {
+		fmt.Printf("Could not load prow configs: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -111,47 +166,51 @@ func TestConfig(t *testing.T) {
 			testgroupMap[testgroup.Name] = 1
 		}
 
-		if !testgroup.IsExternal {
-			t.Errorf("Testgroup %v: IsExternal should always be true!", testgroup.Name)
-		}
+		t.Run("Testgroup "+testgroup.Name, func(t *testing.T) {
+			if !testgroup.IsExternal {
+				t.Error("IsExternal must be true")
+			}
 
-		if !testgroup.UseKubernetesClient {
-			t.Errorf("Testgroup %v: UseKubernetesClient should always be true!", testgroup.Name)
-		}
-
-		for _, prowGcsPrefix := range prowGcsPrefixes {
-			if strings.Contains(testgroup.GcsPrefix, prowGcsPrefix) {
-				// The expectation is that testgroup.Name is the name of a Prow job and the GCSPrefix
-				// follows the convention kubernetes-jenkins/logs/.../jobName
-				// The final part of the prefix should be the job name.
-				expected := filepath.Join(filepath.Dir(testgroup.GcsPrefix), testgroup.Name)
-				if expected != testgroup.GcsPrefix {
-					t.Errorf("Kubernetes Testgroup %v GcsPrefix; Got %v; Want %v", testgroup.Name, testgroup.GcsPrefix, expected)
+			for hIdx, header := range testgroup.ColumnHeader {
+				if header.ConfigurationValue == "" {
+					t.Errorf("Column Header %d is empty", hIdx)
 				}
-				break // out of prowGcsPrefix for loop
-			}
-		}
-
-		if testgroup.TestNameConfig != nil {
-			if testgroup.TestNameConfig.NameFormat == "" {
-				t.Errorf("Testgroup %v: NameFormat must not be empty!", testgroup.Name)
 			}
 
-			if len(testgroup.TestNameConfig.NameElements) != strings.Count(testgroup.TestNameConfig.NameFormat, "%") {
-				t.Errorf("Testgroup %v: TestNameConfig must have number NameElement equal to format count in NameFormat!", testgroup.Name)
+			for _, prowGcsPrefix := range prowGcsPrefixes {
+				if strings.Contains(testgroup.GcsPrefix, prowGcsPrefix) {
+					// The expectation is that testgroup.Name is the name of a Prow job and the GCSPrefix
+					// follows the convention kubernetes-ci-logs/logs/.../jobName
+					// The final part of the prefix should be the job name.
+					expected := filepath.Join(filepath.Dir(testgroup.GcsPrefix), testgroup.Name)
+					if expected != testgroup.GcsPrefix {
+						t.Errorf("GcsPrefix: Got %s; Want %s", testgroup.GcsPrefix, expected)
+					}
+					break // out of prowGcsPrefix for loop
+				}
 			}
-		}
 
-		// All PR testgroup has num_columns_recent equals 20
-		if strings.HasPrefix(testgroup.GcsPrefix, "kubernetes-jenkins/pr-logs/directory/") {
-			if testgroup.NumColumnsRecent < 20 {
-				t.Errorf("Testgroup %v: num_columns_recent: must be greater than 20 for presubmit jobs!", testgroup.Name)
+			if testgroup.TestNameConfig != nil {
+				if testgroup.TestNameConfig.NameFormat == "" {
+					t.Error("Empty NameFormat")
+				}
+
+				if got, want := len(testgroup.TestNameConfig.NameElements), strings.Count(testgroup.TestNameConfig.NameFormat, "%"); got != want {
+					t.Errorf("TestNameConfig has %d elements, format %s wants %d", got, testgroup.TestNameConfig.NameFormat, want)
+				}
 			}
-		}
+
+			// All PR testgroup has num_columns_recent equals 20
+			if strings.HasPrefix(testgroup.GcsPrefix, "kubernetes-jenkins/pr-logs/directory/") || strings.HasPrefix(testgroup.GcsPrefix, "kubernetes-ci-logs/pr-logs/directory/") {
+				if testgroup.NumColumnsRecent < 20 {
+					t.Errorf("presubmit num_columns_recent want >=20, got %d", testgroup.NumColumnsRecent)
+				}
+			}
+		})
 	}
 
 	// dashboard name set
-	dashboardmap := make(map[string]bool)
+	dashboardSet := sets.NewString()
 
 	for dashboardidx, dashboard := range cfg.Dashboards {
 		// All dashboard must have a name
@@ -176,10 +235,10 @@ func TestConfig(t *testing.T) {
 		}
 
 		// All dashboard must not have duplicated names
-		if dashboardmap[dashboard.Name] {
+		if dashboardSet.Has(dashboard.Name) {
 			t.Errorf("Duplicated dashboard: %v", dashboard.Name)
 		} else {
-			dashboardmap[dashboard.Name] = true
+			dashboardSet.Insert(dashboard.Name)
 		}
 
 		// All dashboard must have at least one tab
@@ -230,33 +289,12 @@ func TestConfig(t *testing.T) {
 			} else {
 				testgroupMap[dashboardtab.TestGroupName]++
 			}
-
-			if dashboardtab.AlertOptions != nil && (dashboardtab.AlertOptions.AlertStaleResultsHours != 0 || dashboardtab.AlertOptions.NumFailuresToAlert != 0) {
-				for _, testgroup := range cfg.TestGroups {
-					// Disallow alert options in tab but not group.
-					// Disallow different alert options in tab vs. group.
-					if testgroup.Name == dashboardtab.TestGroupName {
-						if testgroup.AlertStaleResultsHours == 0 {
-							t.Errorf("Cannot define alert_stale_results_hours in DashboardTab %v and not TestGroup %v.", dashboardtab.Name, dashboardtab.TestGroupName)
-						}
-						if testgroup.NumFailuresToAlert == 0 {
-							t.Errorf("Cannot define num_failures_to_alert in DashboardTab %v and not TestGroup %v.", dashboardtab.Name, dashboardtab.TestGroupName)
-						}
-						if testgroup.AlertStaleResultsHours != dashboardtab.AlertOptions.AlertStaleResultsHours {
-							t.Errorf("alert_stale_results_hours for DashboardTab %v must match TestGroup %v.", dashboardtab.Name, dashboardtab.TestGroupName)
-						}
-						if testgroup.NumFailuresToAlert != dashboardtab.AlertOptions.NumFailuresToAlert {
-							t.Errorf("num_failures_to_alert for DashboardTab %v must match TestGroup %v.", dashboardtab.Name, dashboardtab.TestGroupName)
-						}
-					}
-				}
-			}
 		}
 	}
 
 	// No dup of dashboard groups, and no dup dashboard in a dashboard group
-	groups := make(map[string]bool)
-	tabs := make(map[string]string)
+	groupSet := sets.NewString()
+	dashboardToGroupMap := make(map[string]string)
 
 	for idx, dashboardGroup := range cfg.DashboardGroups {
 		// All dashboard must have a name
@@ -281,25 +319,25 @@ func TestConfig(t *testing.T) {
 		}
 
 		// All dashboardgroup must not have duplicated names
-		if _, ok := groups[dashboardGroup.Name]; ok {
+		if groupSet.Has(dashboardGroup.Name) {
 			t.Errorf("Duplicated dashboard: %v", dashboardGroup.Name)
 		} else {
-			groups[dashboardGroup.Name] = true
+			groupSet.Insert(dashboardGroup.Name)
 		}
 
-		if _, ok := dashboardmap[dashboardGroup.Name]; ok {
+		if dashboardSet.Has(dashboardGroup.Name) {
 			t.Errorf("%v is both a dashboard and dashboard group name.", dashboardGroup.Name)
 		}
 
 		for _, dashboard := range dashboardGroup.DashboardNames {
 			// All dashboard must not have duplicated names
-			if exist, ok := tabs[dashboard]; ok {
-				t.Errorf("Duplicated dashboard %v in dashboard group %v and %v", dashboard, exist, dashboardGroup.Name)
+			if assignedGroup, ok := dashboardToGroupMap[dashboard]; ok {
+				t.Errorf("Duplicated dashboard %v in dashboard group %v and %v", dashboard, assignedGroup, dashboardGroup.Name)
 			} else {
-				tabs[dashboard] = dashboardGroup.Name
+				dashboardToGroupMap[dashboard] = dashboardGroup.Name
 			}
 
-			if _, ok := dashboardmap[dashboard]; !ok {
+			if !dashboardSet.Has(dashboard) {
 				t.Errorf("Dashboard %v needs to be defined before adding to a dashboard group!", dashboard)
 			}
 
@@ -307,15 +345,18 @@ func TestConfig(t *testing.T) {
 				t.Errorf("Dashboard %v in group %v must have the group name as a prefix", dashboard, dashboardGroup.Name)
 			}
 		}
+	}
 
-		// Dashboards that match this dashboard group's prefix should be a part of it
-		for dashboard := range dashboardmap {
-			if strings.HasPrefix(dashboard, dashboardGroup.Name+"-") {
-				group, ok := tabs[dashboard]
+	// Dashboards that match this dashboard group's prefix should be a part of it, unless this group is the prefix of the assigned group
+	// (e.g. knative and knative-sandbox).
+	for thisGroup := range groupSet {
+		for dashboard := range dashboardSet {
+			if strings.HasPrefix(dashboard, thisGroup+"-") {
+				assignedGroup, ok := dashboardToGroupMap[dashboard]
 				if !ok {
-					t.Errorf("Dashboard %v should be in dashboard_group %v", dashboard, dashboardGroup.Name)
-				} else if group != dashboardGroup.Name {
-					t.Errorf("Dashboard %v should be in dashboard_group %v instead of dashboard_group %v", dashboard, dashboardGroup.Name, group)
+					t.Errorf("Dashboard %v should be in dashboard_group %v", dashboard, thisGroup)
+				} else if assignedGroup != thisGroup && !strings.HasPrefix(assignedGroup, thisGroup) {
+					t.Errorf("Dashboard %v should be in dashboard_group %v instead of dashboard_group %v", dashboard, thisGroup, assignedGroup)
 				}
 			}
 		}
@@ -335,28 +376,28 @@ func TestConfig(t *testing.T) {
 	}
 }
 
-// TODO(spiffxp): These are all repos that don't have their presubmits in testgrid.
+// TODO: These are all repos that don't have their presubmits in testgrid.
 // Convince sig leads or subproject owners this is a bad idea and whittle this down
 // to just kubernetes-security/
+// Tracking issue: https://github.com/kubernetes/test-infra/issues/18159
 var noPresubmitsInTestgridPrefixes = []string{
 	"containerd/cri",
-	"GoogleCloudPlatform/k8s-multicluster-ingress",
-	"kubeflow/pipelines",
-	"kubernetes-sigs/gcp-compute-persistent-disk-csi-driver",
+	"kubernetes-sigs/cluster-capacity",
 	"kubernetes-sigs/gcp-filestore-csi-driver",
 	"kubernetes-sigs/kind",
+	"kubernetes-sigs/kubetest2",
+	"kubernetes-sigs/oci-proxy",
 	"kubernetes-sigs/kubebuilder-declarative-pattern",
+	"kubernetes-sigs/scheduler-plugins",
 	"kubernetes-sigs/service-catalog",
 	"kubernetes-sigs/sig-storage-local-static-provisioner",
 	"kubernetes-sigs/slack-infra",
 	"kubernetes-sigs/testing_frameworks",
 	"kubernetes/client-go",
-	"kubernetes/cloud-provider-gcp",
 	"kubernetes/cloud-provider-openstack",
 	"kubernetes/dns",
 	"kubernetes/enhancements",
 	"kubernetes/ingress-gce",
-	"kubernetes/k8s.io",
 	"kubernetes/kubeadm",
 	"kubernetes/minikube",
 	// This is the one entry that should be here
@@ -372,16 +413,61 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 	return false
 }
 
+// A job is merge-blocking if it:
+// - is not optional
+// - reports (aka does not skip reporting)
+// - always runs OR runs if some path changed
+func isMergeBlocking(job prow_config.Presubmit) bool {
+	return !job.Optional && !job.SkipReport && (job.AlwaysRun || job.RunIfChanged != "" || job.SkipIfOnlyChanged != "")
+}
+
+// All jobs in presubmits-kubernetes-blocking must be merge-blocking for kubernetes/kubernetes
+// All jobs that are merge-blocking for kubernetes/kubernetes must be in presubmits-kubernetes-blocking
+func TestPresubmitsKubernetesDashboards(t *testing.T) {
+	var dashboard *config_pb.Dashboard
+	repo := "kubernetes/kubernetes"
+	dash := "presubmits-kubernetes-blocking"
+	for _, d := range cfg.Dashboards {
+		if d.Name == dash {
+			dashboard = d
+		}
+	}
+	if dashboard == nil {
+		t.Fatalf("Missing dashboard: %s", dash)
+	}
+	testgroups := make(map[string]bool)
+	for _, tab := range dashboard.DashboardTab {
+		testgroups[tab.TestGroupName] = false
+	}
+	jobs := make(map[string]bool)
+	for _, job := range prowConfig.AllStaticPresubmits([]string{repo}) {
+		if isMergeBlocking(job) {
+			jobs[job.Name] = false
+		}
+	}
+	for job, seen := range jobs {
+		if _, ok := testgroups[job]; !seen && !ok {
+			t.Errorf("%s: job is merge-blocking for %s but missing from %s", job, repo, dash)
+		}
+		jobs[job] = true
+	}
+	for tg, seen := range testgroups {
+		if _, ok := jobs[tg]; !seen && !ok {
+			t.Errorf("%s: should not be in %s because not actually merge-blocking for %s", tg, dash, repo)
+		}
+		testgroups[tg] = true
+	}
+}
+
 func TestKubernetesProwInstanceJobsMustHaveMatchingTestgridEntries(t *testing.T) {
 	jobs := make(map[string]bool)
 
-	prowConfig, err := prow_config.Load(*prowPath, *jobPath)
-	if err != nil {
-		t.Fatalf("Could not load prow configs: %v\n", err)
-	}
-
 	for repo, presubmits := range prowConfig.PresubmitsStatic {
+		// Assume that all jobs in the exceptionList are valid
 		if hasAnyPrefix(repo, noPresubmitsInTestgridPrefixes) {
+			for _, job := range presubmits {
+				jobs[job.Name] = true
+			}
 			continue
 		}
 		for _, job := range presubmits {
@@ -389,7 +475,7 @@ func TestKubernetesProwInstanceJobsMustHaveMatchingTestgridEntries(t *testing.T)
 		}
 	}
 
-	for _, job := range prowConfig.AllPostsubmits([]string{}) {
+	for _, job := range prowConfig.AllStaticPostsubmits([]string{}) {
 		jobs[job.Name] = false
 	}
 
@@ -421,19 +507,15 @@ func TestKubernetesProwInstanceJobsMustHaveMatchingTestgridEntries(t *testing.T)
 	}
 
 	// Conclusion
-	badjobs := []string{}
 	for job, valid := range jobs {
 		if !valid {
-			badjobs = append(badjobs, job)
 			t.Errorf("Job %v does not have a matching testgrid testgroup", job)
 		}
 	}
 
-	badconfigs := []string{}
 	for testgroup, valid := range testgroups {
 		if !valid {
-			badconfigs = append(badconfigs, testgroup)
-			t.Errorf("Testgrid group %v does not have a matching jenkins or prow job", testgroup)
+			t.Errorf("Testgrid group %v is supposed to be moved to have their presubmits in testgrid. See this issue: https://github.com/kubernetes/test-infra/issues/18159", testgroup)
 		}
 	}
 }
@@ -463,13 +545,13 @@ func TestReleaseBlockingJobsMustHaveTestgridDescriptions(t *testing.T) {
 					t.Logf("NOTICE: %v: - Must have a description that starts with OWNER: ", intro)
 				}
 				if dashboardtab.AlertOptions == nil {
-					t.Logf("NOTICE: %v: - Must have alert_options", intro)
+					t.Logf("NOTICE: %v: - Must have alert_options (ensure informing dashboard is listed first in testgrid-dashboards)", intro)
 				} else if dashboardtab.AlertOptions.AlertMailToAddresses == "" {
 					t.Logf("NOTICE: %v: - Must have alert_options.alert_mail_to_addresses", intro)
 				}
 			} else {
 				if dashboardtab.AlertOptions == nil {
-					t.Errorf("%v: - Must have alert_options", intro)
+					t.Errorf("%v: - Must have alert_options (ensure blocking dashboard is listed first in testgrid-dashboards)", intro)
 				} else if dashboardtab.AlertOptions.AlertMailToAddresses == "" {
 					t.Errorf("%v: - Must have alert_options.alert_mail_to_addresses", intro)
 				}
@@ -483,6 +565,9 @@ func TestNoEmpyMailToAddresses(t *testing.T) {
 		for _, dashboardtab := range dashboard.DashboardTab {
 			intro := fmt.Sprintf("dashboard_tab %v/%v", dashboard.Name, dashboardtab.Name)
 			if dashboardtab.AlertOptions != nil {
+				if dashboardtab.AlertOptions.AlertMailToAddresses == "" {
+					continue
+				}
 				mails := strings.Split(dashboardtab.AlertOptions.AlertMailToAddresses, ",")
 				for _, m := range mails {
 					_, err := mail.ParseAddress(m)

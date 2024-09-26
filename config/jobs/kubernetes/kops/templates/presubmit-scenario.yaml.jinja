@@ -1,0 +1,73 @@
+
+  - name: {{job_name}}
+    cluster: {{build_cluster}}
+    branches:
+    - {{branch}}
+    {%- if run_if_changed %}
+    run_if_changed: '{{run_if_changed}}'
+    {%- endif %}
+    always_run: {{always_run}}
+    optional: {{optional}}
+    skip_report: {{skip_report}}
+    labels:
+      {%- if cloud == "aws" %}
+      preset-service-account: "true"
+      preset-aws-ssh: "true"
+      {%- if use_preset_for_account_creds %}
+      {{use_preset_for_account_creds}}: "true"
+      {%- elif not boskos_resource_type %}
+      preset-aws-credential: "true"
+      {%- endif %}
+      preset-dind-enabled: "true"
+      {%- else %}
+      preset-k8s-ssh: "true"
+      {%- endif %}
+    max_concurrency: 1
+    decorate: true
+    decoration_config:
+      timeout: {{job_timeout}}
+    path_alias: k8s.io/kops
+    {%- if scenario == 'scalability' %}
+    extra_refs:
+    - org: kubernetes
+      repo: perf-tests
+      base_ref: master
+      path_alias: k8s.io/perf-tests
+    {%- endif %}
+    spec:
+      {%- if cloud == "gce" %}
+      serviceAccountName: k8s-kops-test
+      {%- endif %}
+      containers:
+      - image: {{image}}
+        imagePullPolicy: Always
+        command:
+        - runner.sh
+        args:
+        - ./tests/e2e/scenarios/{{ scenario }}/run-test.sh
+        securityContext:
+          privileged: true
+        env:
+        - name: KUBE_SSH_KEY_PATH
+          value: {{kops_ssh_key_path}}
+        - name: KUBE_SSH_USER
+          value: {{kops_ssh_user}}
+        - name: GOPATH
+          value: /home/prow/go
+        {%- if artifacts %}
+        - name: ARTIFACTS
+          value: {{artifacts}}
+        {%- endif %}
+        {%- for key, val in env.items() %}
+        - name: {{ key }}
+          value: "{{ val }}"
+        {%- endfor %}
+        resources:
+          requests:
+            cpu: "6"
+            memory: "16Gi"
+          {%- if scenario == 'scalability' %}
+          limits:
+            cpu: "6"
+            memory: "16Gi"
+          {%- endif %}

@@ -18,14 +18,13 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"k8s.io/test-infra/kubetest/e2e"
@@ -67,12 +66,12 @@ func run(deploy deployer, o options) error {
 
 	dump, err := util.OptionalAbsPath(o.dump)
 	if err != nil {
-		return fmt.Errorf("failed handling --dump path: %v", err)
+		return fmt.Errorf("failed handling --dump path: %w", err)
 	}
 
 	dumpPreTestLogs, err := util.OptionalAbsPath(o.dumpPreTestLogs)
 	if err != nil {
-		return fmt.Errorf("failed handling --dump-pre-test-logs path: %v", err)
+		return fmt.Errorf("failed handling --dump-pre-test-logs path: %w", err)
 	}
 
 	if o.up {
@@ -83,7 +82,8 @@ func run(deploy deployer, o options) error {
 
 	// Ensures that the cleanup/down action is performed exactly once.
 	var (
-		downDone = false
+		downDone      = false
+		kubemarkUpErr error
 	)
 
 	var (
@@ -98,6 +98,18 @@ func run(deploy deployer, o options) error {
 			beforeResources, err = listResources()
 			return err
 		}))
+	}
+
+	if o.postTestCmd != "" {
+		// Guaranteed to run after the entire test, including teardown.
+		defer control.XMLWrap(&suite, "Deferred post-test command", func() error {
+			if o.test || (kubemarkUpErr == nil && o.testCmd != "") {
+				cmdLineTokenized := strings.Fields(os.ExpandEnv(o.postTestCmd))
+				return control.FinishRunning(exec.Command(cmdLineTokenized[0], cmdLineTokenized[1:]...))
+			}
+			return nil
+
+		})
 	}
 
 	if o.up {
@@ -127,7 +139,7 @@ func run(deploy deployer, o options) error {
 		}
 		// If node testing is enabled, check that the api is reachable before
 		// proceeding with further steps. This is accomplished by listing the nodes.
-		if !o.nodeTests {
+		if !o.nodeTests && !strings.EqualFold(string(o.build), "none") {
 			errs = util.AppendError(errs, control.XMLWrap(&suite, "Check APIReachability", func() error { return getKubectlVersion(deploy) }))
 			if dump != "" {
 				errs = util.AppendError(errs, control.XMLWrap(&suite, "list nodes", func() error {
@@ -161,7 +173,7 @@ func run(deploy deployer, o options) error {
 		}
 	}
 
-	if dumpPreTestLogs != "" {
+	if !o.skipDumpClusterLogs && dumpPreTestLogs != "" {
 		errs = append(errs, dumpRemoteLogs(deploy, o, dumpPreTestLogs, "pre-test")...)
 	}
 
@@ -169,39 +181,46 @@ func run(deploy deployer, o options) error {
 	if o.test {
 		if err := control.XMLWrap(&suite, "test setup", deploy.TestSetup); err != nil {
 			errs = util.AppendError(errs, err)
-		} else if o.nodeTests {
-			nodeArgs := strings.Fields(o.nodeArgs)
-			errs = util.AppendError(errs, control.XMLWrap(&suite, "Node Tests", func() error {
-				return nodeTest(nodeArgs, o.testArgs, o.nodeTestArgs, o.gcpProject, o.gcpZone)
-			}))
-		} else if err := control.XMLWrap(&suite, "IsUp", deploy.IsUp); err != nil {
-			errs = util.AppendError(errs, err)
 		} else {
-			if o.deployment != "conformance" {
-				errs = util.AppendError(errs, control.XMLWrap(&suite, "kubectl version", func() error { return getKubectlVersion(deploy) }))
-			}
-
-			if o.skew {
-				errs = util.AppendError(errs, control.XMLWrap(&suite, "SkewTest", func() error {
-					return skewTest(testArgs, "skew", o.checkSkew)
+			if o.preTestCmd != "" {
+				errs = util.AppendError(errs, control.XMLWrap(&suite, "pre-test command", func() error {
+					cmdLineTokenized := strings.Fields(os.ExpandEnv(o.preTestCmd))
+					return control.FinishRunning(exec.Command(cmdLineTokenized[0], cmdLineTokenized[1:]...))
 				}))
+			}
+			if o.nodeTests {
+				nodeArgs := strings.Fields(o.nodeArgs)
+				errs = util.AppendError(errs, control.XMLWrap(&suite, "Node Tests", func() error {
+					return nodeTest(nodeArgs, o.testArgs, o.nodeTestArgs, o.gcpProject, o.gcpZone, o.runtimeConfig)
+				}))
+			} else if err := control.XMLWrap(&suite, "IsUp", deploy.IsUp); err != nil {
+				errs = util.AppendError(errs, err)
 			} else {
-				var tester e2e.Tester
-				tester = &GinkgoScriptTester{}
-				if testBuilder, ok := deploy.(e2e.TestBuilder); ok {
-					tester, err = testBuilder.BuildTester(toBuildTesterOptions(&o))
-					errs = util.AppendError(errs, err)
+				if o.deployment != "conformance" {
+					errs = util.AppendError(errs, control.XMLWrap(&suite, "kubectl version", func() error { return getKubectlVersion(deploy) }))
 				}
-				if tester != nil {
-					errs = util.AppendError(errs, control.XMLWrap(&suite, "Test", func() error {
-						return tester.Run(control, testArgs)
+
+				if o.skew {
+					errs = util.AppendError(errs, control.XMLWrap(&suite, "SkewTest", func() error {
+						return skewTest(testArgs, "skew", o.checkSkew)
 					}))
+				} else {
+					var tester e2e.Tester
+					tester = &GinkgoScriptTester{}
+					if testBuilder, ok := deploy.(e2e.TestBuilder); ok {
+						tester, err = testBuilder.BuildTester(toBuildTesterOptions(&o))
+						errs = util.AppendError(errs, err)
+					}
+					if tester != nil {
+						errs = util.AppendError(errs, control.XMLWrap(&suite, "Test", func() error {
+							return tester.Run(control, testArgs)
+						}))
+					}
 				}
 			}
 		}
 	}
 
-	var kubemarkUpErr error
 	if o.kubemark {
 		errs = util.AppendError(errs, control.XMLWrap(&suite, "Kubemark Overall", func() error {
 			if kubemarkUpErr = kubemarkUp(dump, o, deploy); kubemarkUpErr != nil {
@@ -219,6 +238,12 @@ func run(deploy deployer, o options) error {
 		if err := control.XMLWrap(&suite, "test setup", deploy.TestSetup); err != nil {
 			errs = util.AppendError(errs, err)
 		} else {
+			if o.preTestCmd != "" {
+				errs = util.AppendError(errs, control.XMLWrap(&suite, "pre-test command", func() error {
+					cmdLineTokenized := strings.Fields(os.ExpandEnv(o.preTestCmd))
+					return control.FinishRunning(exec.Command(cmdLineTokenized[0], cmdLineTokenized[1:]...))
+				}))
+			}
 			errs = util.AppendError(errs, control.XMLWrap(&suite, o.testCmdName, func() error {
 				cmdLine := os.ExpandEnv(o.testCmd)
 				return control.FinishRunning(exec.Command(cmdLine, o.testCmdArgs...))
@@ -228,18 +253,17 @@ func run(deploy deployer, o options) error {
 
 	// TODO: consider remapping charts, etc to testCmd
 
-	var kubemarkWg sync.WaitGroup
-	var kubemarkDownErr error
 	if o.down && o.kubemark {
-		kubemarkWg.Add(1)
-		go kubemarkDown(&kubemarkDownErr, &kubemarkWg, dump)
+		if err := kubemarkDown(o.provider, dump, o.logexporterGCSPath); err != nil {
+			errs = util.AppendError(errs, err)
+		}
 	}
 
 	if o.charts {
 		errs = util.AppendError(errs, control.XMLWrap(&suite, "Helm Charts", chartsTest))
 	}
 
-	if dump != "" {
+	if !o.skipDumpClusterLogs && dump != "" {
 		errs = append(errs, dumpRemoteLogs(deploy, o, dump, "")...)
 	}
 
@@ -262,10 +286,6 @@ func run(deploy deployer, o options) error {
 			return nil
 		}))
 	}
-
-	// Wait for kubemarkDown step to finish before going further.
-	kubemarkWg.Wait()
-	errs = util.AppendError(errs, kubemarkDownErr)
 
 	// Save the state if we upped a new cluster without downing it
 	if o.save != "" && ((!o.down && o.up) || (o.up && o.deployment != "none")) {
@@ -296,7 +316,7 @@ func run(deploy deployer, o options) error {
 	if len(errs) == 0 && o.publish != "" {
 		errs = util.AppendError(errs, control.XMLWrap(&suite, "Publish version", func() error {
 			// Use plaintext version file packaged with kubernetes.tar.gz
-			v, err := ioutil.ReadFile("version")
+			v, err := os.ReadFile("version")
 			if err != nil {
 				return err
 			}
@@ -374,7 +394,7 @@ func listNodes(dp deployer, dump string) error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(filepath.Join(dump, "nodes.yaml"), b, 0644)
+	return os.WriteFile(filepath.Join(dump, "nodes.yaml"), b, 0644)
 }
 
 func listKubemarkNodes(dp deployer, dump string) error {
@@ -390,13 +410,13 @@ func listKubemarkNodes(dp deployer, dump string) error {
 	if err != nil {
 		return err
 	}
-	return ioutil.WriteFile(filepath.Join(dump, "kubemark_nodes.yaml"), b, 0644)
+	return os.WriteFile(filepath.Join(dump, "kubemark_nodes.yaml"), b, 0644)
 }
 
 func diffResources(before, clusterUp, clusterDown, after []byte, location string) error {
 	if location == "" {
 		var err error
-		location, err = ioutil.TempDir("", "e2e-check-resources")
+		location, err = os.MkdirTemp("", "e2e-check-resources")
 		if err != nil {
 			return fmt.Errorf("Could not create e2e-check-resources temp dir: %s", err)
 		}
@@ -409,21 +429,21 @@ func diffResources(before, clusterUp, clusterDown, after []byte, location string
 	ap := filepath.Join(location, "gcp-resources-after.txt")
 	dp := filepath.Join(location, "gcp-resources-diff.txt")
 
-	if err := ioutil.WriteFile(bp, before, mode); err != nil {
+	if err := os.WriteFile(bp, before, mode); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(up, clusterUp, mode); err != nil {
+	if err := os.WriteFile(up, clusterUp, mode); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(cdp, clusterDown, mode); err != nil {
+	if err := os.WriteFile(cdp, clusterDown, mode); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(ap, after, mode); err != nil {
+	if err := os.WriteFile(ap, after, mode); err != nil {
 		return err
 	}
 
 	stdout, cerr := control.Output(exec.Command("diff", "-sw", "-U0", "-F^\\[.*\\]$", bp, ap))
-	if err := ioutil.WriteFile(dp, stdout, mode); err != nil {
+	if err := os.WriteFile(dp, stdout, mode); err != nil {
 		return err
 	}
 	if cerr == nil { // No diffs
@@ -515,12 +535,30 @@ func isUp(d deployer) error {
 	return nil
 }
 
-func defaultDumpClusterLogs(localArtifactsDir, logexporterGCSPath string) error {
-	logDumpPath := "./cluster/log-dump/log-dump.sh"
-	// cluster/log-dump/log-dump.sh only exists in the Kubernetes tree
-	// post-1.3. If it doesn't exist, print a debug log but do not report an error.
+func logDumpPath(provider string) string {
+	// Use the log dumping script outside of kubernetes/kubernetes repo.
+	// Guarding against K8s provider as the script is tested only for gce
+	// and gke cases at the moment.
+	if os.Getenv("USE_TEST_INFRA_LOG_DUMPING") == "true" && (provider == "gce" || provider == "gke") {
+		if logDumpPath := os.Getenv("LOG_DUMP_SCRIPT_PATH"); logDumpPath != "" {
+			return logDumpPath
+		}
+	}
+	return "./cluster/log-dump/log-dump.sh"
+}
+
+func kubemarkPath() string {
+	if kubemarkPath := os.Getenv("KUBEMARK_PATH"); kubemarkPath != "" {
+		return os.ExpandEnv(kubemarkPath)
+	}
+
+	return "./test/kubemark/"
+}
+
+func defaultDumpClusterLogs(localArtifactsDir, logexporterGCSPath, provider string) error {
+	logDumpPath := logDumpPath(provider)
 	if _, err := os.Stat(logDumpPath); err != nil {
-		log.Printf("Could not find %s. This is expected if running tests against a Kubernetes 1.3 or older tree.", logDumpPath)
+		log.Printf("Could not find %s.", logDumpPath)
 		if cwd, err := os.Getwd(); err == nil {
 			log.Printf("CWD: %v", cwd)
 		}
@@ -543,7 +581,7 @@ func chartsTest() error {
 	return control.FinishRunning(exec.Command(cmdline))
 }
 
-func nodeTest(nodeArgs []string, testArgs, nodeTestArgs, project, zone string) error {
+func nodeTest(nodeArgs []string, testArgs, nodeTestArgs, project, zone, runtimeConfig string) error {
 	// Run node e2e tests.
 	// TODO(krzyzacy): remove once nodeTest is stable
 	if wd, err := os.Getwd(); err == nil {
@@ -552,7 +590,7 @@ func nodeTest(nodeArgs []string, testArgs, nodeTestArgs, project, zone string) e
 
 	sshKeyPath := os.Getenv("JENKINS_GCE_SSH_PRIVATE_KEY_FILE")
 	if _, err := os.Stat(sshKeyPath); err != nil {
-		return fmt.Errorf("Cannot find ssh key from: %v, err : %v", sshKeyPath, err)
+		return fmt.Errorf("Cannot find ssh key from: %v, err : %w", sshKeyPath, err)
 	}
 
 	artifactsDir, ok := os.LookupEnv("ARTIFACTS")
@@ -561,22 +599,37 @@ func nodeTest(nodeArgs []string, testArgs, nodeTestArgs, project, zone string) e
 		artifactsDir = filepath.Join(os.Getenv("WORKSPACE"), "_artifacts")
 	}
 
+	var sshUser string
+	// Use the KUBE_SSH_USER environment variable if it is set. This is particularly
+	// required for Fedora CoreOS hosts that only have the user 'core`. Tests
+	// using Fedora CoreOS as a host for node tests must set KUBE_SSH_USER
+	// environment variable so that test infrastructure can communicate with the host
+	// successfully using ssh.
+	if os.Getenv("KUBE_SSH_USER") != "" {
+		sshUser = os.Getenv("KUBE_SSH_USER")
+	} else {
+		sshUser = os.Getenv("USER")
+	}
+
 	// prep node args
 	runner := []string{
 		"run",
 		util.K8s("kubernetes", "test", "e2e_node", "runner", "remote", "run_remote.go"),
 		"--cleanup",
-		"--logtostderr",
-		"--vmodule=*=4",
+		"-vmodule=*=4", // This causes more runtime overhead than -v=4, but perhaps there is a reason for using it?
 		"--ssh-env=gce",
 		fmt.Sprintf("--results-dir=%s", artifactsDir),
 		fmt.Sprintf("--project=%s", project),
 		fmt.Sprintf("--zone=%s", zone),
-		fmt.Sprintf("--ssh-user=%s", os.Getenv("USER")),
+		fmt.Sprintf("--ssh-user=%s", sshUser),
 		fmt.Sprintf("--ssh-key=%s", sshKeyPath),
 		fmt.Sprintf("--ginkgo-flags=%s", testArgs),
 		fmt.Sprintf("--test_args=%s", nodeTestArgs),
 		fmt.Sprintf("--test-timeout=%s", timeout.String()),
+	}
+
+	if runtimeConfig != "" {
+		runner = append(runner, fmt.Sprintf("--runtime-config=%s", runtimeConfig))
 	}
 
 	runner = append(runner, nodeArgs...)
@@ -587,10 +640,15 @@ func nodeTest(nodeArgs []string, testArgs, nodeTestArgs, project, zone string) e
 func kubemarkUp(dump string, o options, deploy deployer) error {
 	// Stop previously running kubemark cluster (if any).
 	if err := control.XMLWrap(&suite, "Kubemark TearDown Previous", func() error {
-		return control.FinishRunning(exec.Command("./test/kubemark/stop-kubemark.sh"))
+		if err := control.FinishRunning(exec.Command(path.Join(kubemarkPath(), "stop-kubemark.sh"))); err != nil {
+			return fmt.Errorf("failed to stop kubemark cluster, err: %w", err)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
+
+	log.Printf("finished tearing down kubemark")
 
 	if err := control.XMLWrap(&suite, "IsUp", deploy.IsUp); err != nil {
 		return err
@@ -598,7 +656,7 @@ func kubemarkUp(dump string, o options, deploy deployer) error {
 
 	// Start kubemark cluster.
 	if err := control.XMLWrap(&suite, "Kubemark Up", func() error {
-		return control.FinishRunning(exec.Command("./test/kubemark/start-kubemark.sh"))
+		return control.FinishRunning(exec.Command(path.Join(kubemarkPath(), "start-kubemark.sh")))
 	}); err != nil {
 		return err
 	}
@@ -615,33 +673,52 @@ func kubemarkUp(dump string, o options, deploy deployer) error {
 		return err
 	}
 
-	masterIP, err := control.Output(exec.Command(
-		"gcloud", "compute", "addresses", "describe",
-		os.Getenv("MASTER_NAME")+"-ip",
-		"--project="+o.gcpProject,
-		"--region="+o.gcpZone[:len(o.gcpZone)-2],
-		"--format=value(address)"))
-	if err != nil {
-		return fmt.Errorf("failed to get masterIP: %v", err)
+	var masterIP, masterInternalIP []byte
+
+	if o.deployment == "bash" && o.provider == "gce" {
+		var err error
+		masterIP, err = control.Output(exec.Command(
+			"gcloud", "compute", "addresses", "describe",
+			os.Getenv("MASTER_NAME")+"-ip",
+			"--project="+o.gcpProject,
+			"--region="+o.gcpZone[:len(o.gcpZone)-2],
+			"--format=value(address)"))
+		if err != nil {
+			return fmt.Errorf("failed to get masterIP: %w", err)
+		}
+
+		masterInternalIP, err = control.Output(exec.Command(
+			"gcloud", "compute", "instances", "describe",
+			os.Getenv("MASTER_NAME"),
+			"--project="+o.gcpProject,
+			"--zone="+o.gcpZone,
+			"--format=value(networkInterfaces[0].networkIP)"))
+		if err != nil {
+			return fmt.Errorf("failed to get masterInternalIP: %w", err)
+		}
+	} else if o.deployment == "aks" {
+		var err error
+		masterIP, err = control.Output(exec.Command(
+			"az", "aks", "show",
+			"-g", *aksResourceGroupName,
+			"-n", *aksResourceName,
+			"--query", "fqdn", "-o", "tsv"))
+		if err != nil {
+			return fmt.Errorf("failed to get masterIP: %w", err)
+		}
+		masterInternalIP = masterIP
 	}
+
 	if err := os.Setenv("KUBE_MASTER_IP", strings.TrimSpace(string(masterIP))); err != nil {
 		return err
 	}
+
 	// MASTER_IP variable is required by the clusterloader. It requires to have master ip provided,
 	// due to master being unregistered.
 	if err := os.Setenv("MASTER_IP", strings.TrimSpace(string(masterIP))); err != nil {
 		return err
 	}
 
-	masterInternalIP, err := control.Output(exec.Command(
-		"gcloud", "compute", "instances", "describe",
-		os.Getenv("MASTER_NAME"),
-		"--project="+o.gcpProject,
-		"--zone="+o.gcpZone,
-		"--format=value(networkInterfaces[0].networkIP)"))
-	if err != nil {
-		return fmt.Errorf("failed to get masterInternalIP: %v", err)
-	}
 	// MASTER_INTERNAL_IP variable is needed by the clusterloader2 when running on kubemark clusters.
 	if err := os.Setenv("MASTER_INTERNAL_IP", strings.TrimSpace(string(masterInternalIP))); err != nil {
 		return err
@@ -691,13 +768,31 @@ func kubemarkGinkgoTest(testArgs []string, dump string) error {
 }
 
 // Brings down the kubemark cluster.
-func kubemarkDown(err *error, wg *sync.WaitGroup, dump string) {
-	defer wg.Done()
+func kubemarkDown(provider, dump, logexporterGCSPath string) error {
 	control.XMLWrap(&suite, "Kubemark MasterLogDump", func() error {
-		return control.FinishRunning(exec.Command("./test/kubemark/master-log-dump.sh", dump))
+		logDumpPath := logDumpPath(provider)
+		masterName := os.Getenv("MASTER_NAME")
+		var cmd *exec.Cmd
+		if provider == "gke" {
+			log.Printf("Skipping dumping logs for gke provider")
+			return nil
+		}
+		if logexporterGCSPath != "" {
+			log.Printf("Dumping logs for kubemark master to GCS directly at path: %v", logexporterGCSPath)
+			cmd = exec.Command(logDumpPath, dump, logexporterGCSPath)
+		} else {
+			log.Printf("Dumping logs for kubemark master locally to: %v", dump)
+			cmd = exec.Command(logDumpPath, dump)
+		}
+		cmd.Env = append(
+			os.Environ(),
+			"KUBEMARK_MASTER_NAME="+masterName,
+			"DUMP_ONLY_MASTER_LOGS=true",
+		)
+		return control.FinishRunning(cmd)
 	})
-	*err = control.XMLWrap(&suite, "Kubemark TearDown", func() error {
-		return control.FinishRunning(exec.Command("./test/kubemark/stop-kubemark.sh"))
+	return control.XMLWrap(&suite, "Kubemark TearDown", func() error {
+		return control.FinishRunning(exec.Command(path.Join(kubemarkPath(), "stop-kubemark.sh")))
 	})
 }
 
@@ -737,8 +832,9 @@ func (t *GinkgoScriptTester) Run(control *process.Control, testArgs []string) er
 // toBuildTesterOptions builds the BuildTesterOptions data structure for passing to BuildTester
 func toBuildTesterOptions(o *options) *e2e.BuildTesterOptions {
 	return &e2e.BuildTesterOptions{
-		FocusRegex:  o.focusRegex,
-		SkipRegex:   o.skipRegex,
-		Parallelism: o.ginkgoParallel.Get(),
+		FocusRegex:            o.focusRegex,
+		SkipRegex:             o.skipRegex,
+		Parallelism:           o.ginkgoParallel.Get(),
+		StorageTestDriverPath: o.storageTestDriverPath,
 	}
 }

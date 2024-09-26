@@ -19,12 +19,10 @@ package kind
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -46,16 +44,18 @@ const (
 	kindBinaryStable = "stable"
 
 	// If a new version of kind is released this value has to be updated.
-	kindBinaryStableTag = "v0.5.1"
+	kindBinaryStableTag = "v0.7.0"
 
 	kindClusterNameDefault = "kind-kubetest"
 
-	flagLogLevel = "--loglevel=debug"
+	flagLogLevel = "--verbosity=9"
 )
 
 var (
 	kindConfigPath = flag.String("kind-config-path", "",
 		"(kind only) Path to the kind configuration file.")
+	kindKubeconfigPath = flag.String("kind-kubeconfig-path", "",
+		"(kind only) Path to the kubeconfig file for kind create cluster command.")
 	kindBaseImage = flag.String("kind-base-image", "",
 		"(kind only) name:tag of the base image to use for building the node image for kind.")
 	kindBinaryVersion = flag.String("kind-binary-version", kindBinaryStable,
@@ -76,27 +76,18 @@ var (
 
 // Deployer is an object the satisfies the kubetest main deployer interface.
 type Deployer struct {
-	control           *process.Control
-	buildType         string
-	configPath        string
-	importPathK8s     string
-	importPathKind    string
-	kindBinaryDir     string
-	kindBinaryVersion string
-	kindBinaryPath    string
-	kindNodeImage     string
-	kindBaseImage     string
-	kindClusterName   string
-}
-
-type kindReleaseAsset struct {
-	Name        string `json:"name"`
-	DownloadURL string `json:"browser_download_url"`
-}
-
-type kindRelease struct {
-	Tag    string             `json:"tag_name"`
-	Assets []kindReleaseAsset `json:"assets"`
+	control            *process.Control
+	buildType          string
+	configPath         string
+	importPathK8s      string
+	importPathKind     string
+	kindBinaryDir      string
+	kindBinaryVersion  string
+	kindBinaryPath     string
+	kindKubeconfigPath string
+	kindNodeImage      string
+	kindBaseImage      string
+	kindClusterName    string
 }
 
 // NewDeployer creates a new kind deployer.
@@ -127,15 +118,27 @@ func initializeDeployer(ctl *process.Control, buildType string) (*Deployer, erro
 			return nil, err
 		}
 	}
+
+	kubeconfigPath := *kindKubeconfigPath
+	if kubeconfigPath == "" {
+		// Create directory for the cluster kube config
+		kindClusterDir := filepath.Join(kindBinaryDir, *kindClusterName)
+		if err := os.MkdirAll(kindClusterDir, 0770); err != nil {
+			return nil, err
+		}
+		kubeconfigPath = filepath.Join(kindClusterDir, "kubeconfig")
+	}
+
 	d := &Deployer{
-		control:           ctl,
-		buildType:         buildType,
-		configPath:        *kindConfigPath,
-		kindBinaryDir:     kindBinaryDir,
-		kindBinaryPath:    filepath.Join(kindBinaryDir, "kind"),
-		kindBinaryVersion: *kindBinaryVersion,
-		kindNodeImage:     *kindNodeImage,
-		kindClusterName:   *kindClusterName,
+		control:            ctl,
+		buildType:          buildType,
+		configPath:         *kindConfigPath,
+		kindBinaryDir:      kindBinaryDir,
+		kindBinaryPath:     filepath.Join(kindBinaryDir, "kind"),
+		kindBinaryVersion:  *kindBinaryVersion,
+		kindKubeconfigPath: kubeconfigPath,
+		kindNodeImage:      *kindNodeImage,
+		kindClusterName:    *kindClusterName,
 	}
 	// Obtain the import paths for k8s and kind
 	d.importPathK8s, err = d.getImportPath("k8s.io/kubernetes")
@@ -168,34 +171,10 @@ func (d *Deployer) getImportPath(path string) (string, error) {
 	return filepath.Join(trimmed, "src", path), nil
 }
 
-// getKubeConfigPath returns the path to the kubeconfig file.
-func (d *Deployer) getKubeConfigPath() (string, error) {
-	log.Println("kind.go:getKubeConfigPath()")
-	args := []string{"get", "kubeconfig-path"}
-
-	// Use a specific cluster name.
-	if d.kindClusterName != "" {
-		args = append(args, "--name="+d.kindClusterName)
-	}
-
-	o, err := d.control.Output(exec.Command("kind", args...))
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSuffix(string(o), "\n"), nil
-}
-
 // setKubeConfigEnv sets the KUBECONFIG environment variable.
 func (d *Deployer) setKubeConfigEnv() error {
 	log.Println("kind.go:setKubeConfigEnv()")
-	path, err := d.getKubeConfigPath()
-	if err != nil {
-		return err
-	}
-	if err = os.Setenv("KUBECONFIG", path); err != nil {
-		return err
-	}
-	return nil
+	return os.Setenv("KUBECONFIG", d.kindKubeconfigPath)
 }
 
 // prepareKindBinary either builds kind from source or pulls a binary from GitHub.
@@ -235,7 +214,7 @@ func (d *Deployer) prepareKindBinary() error {
 	return nil
 }
 
-// Build handles building kubernetes / kubectl / the node image.
+// Build handles building kubernetes / kubectl / the node image / ginkgo.
 func (d *Deployer) Build() error {
 	log.Println("kind.go:Build()")
 	// Adapt the build type if needed.
@@ -256,7 +235,7 @@ func (d *Deployer) Build() error {
 		buildNodeImage = kindNodeImageLatest
 	}
 
-	args := []string{"build", "node-image", "--type=" + buildType, flagLogLevel, "--kube-root=" + d.importPathK8s}
+	args := []string{"build", "node-image", "--type=" + buildType, flagLogLevel}
 	if buildNodeImage != "" {
 		args = append(args, "--image="+buildNodeImage)
 		// override user-specified node image
@@ -267,16 +246,26 @@ func (d *Deployer) Build() error {
 	}
 
 	// Build the node image (including kubernetes)
+	args = append(args, d.importPathK8s)
 	cmd := exec.Command("kind", args...)
 	if err := d.control.FinishRunning(cmd); err != nil {
 		return err
+	}
+
+	// Ginkgo v1 is used by Kubernetes 1.24 and earlier and exists in the vendor directory.
+	// Historically it has been built with the "vendor" prefix.
+	ginkgoTarget := "vendor/github.com/onsi/ginkgo/ginkgo"
+	if _, err := os.Stat(ginkgoTarget); os.IsNotExist(err) {
+		// If the directory doesn't exist, then we must be on Kubernetes >= 1.25 with Ginkgo V2.
+		// The "vendor" prefix is no longer needed.
+		ginkgoTarget = "github.com/onsi/ginkgo/v2/ginkgo"
 	}
 
 	// Build binaries for the host, including kubectl, ginkgo, e2e.test
 	if d.buildType != "bazel" {
 		cmd := exec.Command(
 			"make", "all",
-			"WHAT=cmd/kubectl test/e2e/e2e.test vendor/github.com/onsi/ginkgo/ginkgo",
+			"WHAT=cmd/kubectl test/e2e/e2e.test"+" "+ginkgoTarget,
 		)
 		cmd.Dir = d.importPathK8s
 		if err := d.control.FinishRunning(cmd); err != nil {
@@ -293,7 +282,7 @@ func (d *Deployer) Build() error {
 		cmd := exec.Command(
 			"bazel", "build",
 			"//cmd/kubectl", "//test/e2e:e2e.test",
-			"//vendor/github.com/onsi/ginkgo/ginkgo",
+			"//"+ginkgoTarget,
 		)
 		cmd.Dir = d.importPathK8s
 		if err := d.control.FinishRunning(cmd); err != nil {
@@ -334,16 +323,20 @@ func (d *Deployer) Up() error {
 		args = append(args, "--name="+d.kindClusterName)
 	}
 
+	// Use specific path for the kubeconfig
+	if d.kindKubeconfigPath != "" {
+		args = append(args, "--kubeconfig="+d.kindKubeconfigPath)
+	}
+
 	// Build the kind cluster.
 	cmd := exec.Command("kind", args...)
 	if err := d.control.FinishRunning(cmd); err != nil {
 		return err
 	}
-
-	// set KUBECONFIG
-	if err := d.setKubeConfigEnv(); err != nil {
-		return err
-	}
+	log.Println("*************************************************************************************************")
+	log.Println("Cluster is UP")
+	log.Printf("Run: \"export KUBECONFIG=%s\" to access to it\n", d.kindKubeconfigPath)
+	log.Println("*************************************************************************************************")
 	return nil
 }
 
@@ -394,7 +387,9 @@ func (d *Deployer) TestSetup() error {
 	log.Println("kind.go:TestSetup()")
 
 	// set conformance env so ginkgo.sh etc won't try to do provider setup
-	os.Setenv("KUBERNETES_CONFORMANCE_TEST", "y")
+	if err := os.Setenv("KUBERNETES_CONFORMANCE_TEST", "y"); err != nil {
+		return err
+	}
 
 	// Proceed only if a cluster exists.
 	exists, err := d.clusterExists()
@@ -462,6 +457,15 @@ func (d *Deployer) Down() error {
 	if err := d.control.FinishRunning(cmd); err != nil {
 		return err
 	}
+
+	if d.kindClusterName != "" {
+		kindClusterDir := filepath.Join(d.kindBinaryDir, d.kindClusterName)
+		if _, err := os.Stat(kindClusterDir); !os.IsNotExist(err) {
+			if err := os.RemoveAll(kindClusterDir); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -474,6 +478,9 @@ func (d *Deployer) GetClusterCreated(gcpProject string) (time.Time, error) {
 // KubectlCommand returns the exec.Cmd command for kubectl.
 func (d *Deployer) KubectlCommand() (*exec.Cmd, error) {
 	log.Println("kind.go:KubectlCommand()")
+	if err := d.setKubeConfigEnv(); err != nil {
+		return nil, err
+	}
 	// Avoid using ./cluster/kubectl.sh
 	// TODO(bentheelder): cache this
 	return exec.Command("kubectl"), nil
@@ -531,75 +538,4 @@ func hashFile(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// getKindRelease accepts either a kind release tag or 'kindBinaryLatest'.
-// UNUSED: we might end up using this one day.
-func getKindRelease(tag string) (*kindRelease, error) {
-	b, err := getFromURL("https://api.github.com/repos/kubernetes-sigs/kind/releases")
-	if err != nil {
-		return nil, err
-	}
-
-	var releases []kindRelease
-	err = json.Unmarshal(b, &releases)
-	if err != nil {
-		return nil, err
-	}
-	if len(releases) == 0 {
-		return nil, errors.New("could not obtain a list of releases from GitHub")
-	}
-
-	switch tag {
-	case kindBinaryBuild:
-		return &releases[0], nil
-	default:
-		for _, r := range releases {
-			if r.Tag == tag {
-				return &r, nil
-			}
-		}
-		return nil, fmt.Errorf("could not find a release tagged as %q", tag)
-	}
-}
-
-// getKindBinaryFromRelease downloads a kind binary based on arch/platform (assetName) and a kindRelease.
-// UNUSED: we might end up using this one day.
-func getKindBinaryFromRelease(release *kindRelease, assetName string) ([]byte, error) {
-	if release == nil {
-		return nil, errors.New("getKindBinaryFromRelease() received nil value for 'release'")
-	}
-	if len(release.Assets) == 0 {
-		return nil, fmt.Errorf("no assets defined for release %q", release.Tag)
-	}
-	for _, a := range release.Assets {
-		if strings.Contains(a.Name, assetName) {
-			log.Printf("Downloading asset name %q for kind release tag %q", assetName, release.Tag)
-			b, err := getFromURL(a.DownloadURL)
-			if err != nil {
-				return nil, err
-			}
-			return b, nil
-		}
-	}
-	return nil, fmt.Errorf("no matching asset name %q", assetName)
-}
-
-// getFromURL downloads raw bytes from a URL.
-func getFromURL(url string) ([]byte, error) {
-	timeout := time.Duration(60 * time.Second)
-	client := http.Client{
-		Timeout: timeout,
-	}
-	resp, err := client.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	return b, nil
 }

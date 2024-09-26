@@ -1,9 +1,12 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
+reviewers:
+- cjwagner
 approvers:
 - cjwagner
-- fejta
+emeritus_approvers:
 - krzyzacy
+- fejta
 
 labels:
 - area/jenkins

@@ -12,22 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-IMG = gcr.io/k8s-testimages/kettle
+include ../Makefile.base.mk
+# Makefile.base.mk requires REPO_ROOT to be set
+REPO_ROOT:=${CURDIR}/..
+
+IMG = gcr.io/k8s-staging-test-infra/kettle
 TAG := $(shell date +v%Y%m%d)-$(shell git describe --tags --always --dirty)
 
 # These are the usual GKE variables.
-PROJECT       ?= k8s-gubernator
-ZONE          ?= us-west1-b
-CLUSTER       ?= g8r
+PROJECT       ?= kubernetes-public
+ZONE          ?= us-central1
+CLUSTER       ?= aaa
 
 get-cluster-credentials:
-	kubectl config use-context gke_k8s-gubernator_us-west1-b_g8r || gcloud container clusters get-credentials "$(CLUSTER)" --project="$(PROJECT)" --zone="$(ZONE)"
+	kubectl config use-context gke_kubernetes-public_us-central1_aaa || gcloud container clusters get-credentials "$(CLUSTER)" --project="$(PROJECT)" --zone="$(ZONE)"
 
 push-prod:
-  bazel run //images/builder -- --project=k8s-testimages --scratch-bucket=gs://k8s-testimages-scratch kettle
+	../hack/make-rules/go-run/arbitrary.sh run ./images/builder --project=k8s-staging-infra-tools --scratch-bucket=gs://k8s-testimages-scratch --build-dir=. kettle/
 
 push:
-	bazel run //images/builder -- --allow-dirty kettle
+	../hack/make-rules/go-run/arbitrary.sh run ./images/builder --project=k8s-staging-infra-tools --allow-dirty --build-dir=. kettle/
 
 deploy: get-cluster-credentials
 	sed "s/:latest/:$(TAG)/g" deployment.yaml | kubectl apply -f - --record
@@ -35,8 +39,27 @@ deploy: get-cluster-credentials
 update: get-cluster-credentials
 	kubectl set image deployment/kettle kettle=$(IMG):$(TAG) --record
 
+deploy-staging: get-cluster-credentials
+	sed "s/:latest/:$(TAG)/g" deployment-staging.yaml | kubectl apply -f - --record
+
+update-staging: get-cluster-credentials
+	kubectl set image deployment/kettle-staging kettle-staging=$(IMG):$(TAG) --record
+
 rollback: get-cluster-credentials
 	kubectl rollout undo deployments/kettle
 
+test-make-db: ensure-py-requirements3
+	../hack/run-in-python-container.sh ./kettle/make_db_test.py
 
-.PHONY: all push
+test-model: ensure-py-requirements3
+	../hack/run-in-python-container.sh ./kettle/model_test.py
+
+test-stream: ensure-py-requirements3
+	../hack/run-in-python-container.sh ./kettle/stream_test.py
+
+test-make-json: ensure-py-requirements3
+	../hack/run-in-python-container.sh ./kettle/make_json_test.py
+
+test: test-make-db test-model test-stream test-make-json
+
+.PHONY: all push test-make-db

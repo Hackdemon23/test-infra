@@ -1,4 +1,10 @@
-approvers:
-- micahhausler
-- sethpollack
+reviewers:
 - justinsb
+- micahhausler
+- nckturner
+- wongma7
+approvers:
+- justinsb
+- micahhausler
+- nckturner
+- wongma7

@@ -3,98 +3,64 @@ presets:
     preset-pull-gce-device-plugin-gpu: "true"
   env:
   - name: NODE_ACCELERATORS
-    value: type=nvidia-tesla-k80,count=2
+    value: type=nvidia-tesla-t4,count=4
   - name: CREATE_CUSTOM_NETWORK
     value: "true"
+  - name: NODE_SIZE
+    value: n1-standard-2
 
 presubmits:
   kubernetes/kubernetes:
   - name: pull-kubernetes-e2e-gce-device-plugin-gpu
+    cluster: k8s-infra-prow-build
     skip_branches:
     - release-\d+\.\d+
     annotations:
       fork-per-release: "true"
       testgrid-create-test-group: "true"
-    always_run: true
     optional: true
-    max_concurrency: 12
+    max_concurrency: 5
     labels:
       preset-service-account: "true"
       preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
-      preset-bazel-remote-cache-enabled: "true"
+      preset-dind-enabled: "true"
       preset-pull-kubernetes-e2e: "true"
       preset-pull-gce-device-plugin-gpu: "true"
+    decorate: true
+    decoration_config:
+      timeout: 90m
+    path_alias: k8s.io/kubernetes
+    extra_refs:
+    - org: kubernetes
+      repo: release
+      base_ref: master
+      path_alias: k8s.io/release
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+      - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+        command:
+        - runner.sh
+        - /workspace/scenarios/kubernetes_e2e.py
         args:
-        - --root=/go/src
-        - "--job=$(JOB_NAME)"
-        - "--repo=k8s.io/$(REPO_NAME)=$(PULL_REFS)"
-        - "--repo=k8s.io/release"
-        - "--service-account=/etc/service-account/service-account.json"
-        - "--upload=gs://kubernetes-jenkins/pr-logs"
-        - "--timeout=90"
-        - --scenario=kubernetes_e2e
-        - --
-        - --build=bazel
+        - --build=quick
         - --cluster=
-        - --extract=local
+        # Note: The GCE Node image used may have a dependency on the nvidia-driver-installer image defined in https://github.com/kubernetes/kubernetes/blob/master/test/e2e/testing-manifests/scheduling/nvidia-driver-installer.yaml
+        # If updating the image defined here, the cos-gpu-installer image may need to updated to support the corresponding COS image.
+        - --env=KUBE_GCE_NODE_IMAGE=cos-109-17800-147-22
         - --gcp-node-image=gci
-        - --gcp-nodes=4
-        - --gcp-project=k8s-jkns-pr-gce-gpus
+        - --gcp-nodes=2
+        - --gcp-project-type=gpu-project
         - --gcp-zone=us-west1-b
         - --ginkgo-parallel=30
         - --provider=gce
-        - --stage=gs://kubernetes-release-pull/ci/pull-kubernetes-e2e-gce-device-plugin-gpu
         - --test_args=--ginkgo.focus=\[Feature:GPUDevicePlugin\] --minStartupPods=8
         - --timeout=60m
         resources:
+          limits:
+            cpu: 4
+            memory: "14Gi"
           requests:
-            memory: "6Gi"
-  - name: pull-kubernetes-e2e-gke-device-plugin-gpu
-    skip_branches:
-    - release-\d+\.\d+
-    annotations:
-      fork-per-release: "true"
-      testgrid-create-test-group: "true"
-    always_run: false
-    skip_report: false
-    max_concurrency: 1
-    labels:
-      preset-service-account: "true"
-      preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
-    spec:
-      containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        args:
-        - --root=/go/src
-        - "--job=$(JOB_NAME)"
-        - "--repo=k8s.io/$(REPO_NAME)=$(PULL_REFS)"
-        - "--repo=k8s.io/release"
-        - "--service-account=/etc/service-account/service-account.json"
-        - "--upload=gs://kubernetes-jenkins/pr-logs"
-        - "--timeout=90"
-        - --scenario=kubernetes_e2e
-        - --
-        - --build=bazel
-        - --cluster=
-        - --deployment=gke
-        - --extract=local
-        - --gcp-cloud-sdk=gs://cloud-sdk-testing/ci/staging
-        - --gcp-node-image=gci
-        - --gcp-project=k8s-gke-gpu-pr
-        - --gcp-zone=us-west1-b
-        - --ginkgo-parallel=30
-        - --gke-create-command=container clusters create --accelerator=type=nvidia-tesla-k80,count=2
-        - --gke-environment=test
-        - --provider=gke
-        - --stage=gs://kubernetes-release-dev/ci
-        - --stage-suffix=pull-kubernetes-e2e-gke-device-plugin-gpu
-        - --test_args=--ginkgo.focus=\[Feature:GPUDevicePlugin\] --minStartupPods=8
-        - --timeout=60m
-        resources:
-          requests:
-            memory: "6Gi"
+            cpu: 4
+            memory: "14Gi"
+        securityContext:
+          privileged: true

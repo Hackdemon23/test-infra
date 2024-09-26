@@ -1,0 +1,46 @@
+
+- name: {{job_name}}
+  cluster: {{build_cluster}}
+  cron: '{{cron}}'
+  labels:
+    preset-service-account: "true"
+    preset-aws-ssh: "true"
+    {%- if build_cluster == "default" %}
+    preset-aws-credential: "true"
+    {%- endif %}
+    preset-dind-enabled: "true"
+  max_concurrency: 1
+  decorate: true
+  decoration_config:
+    timeout: {{job_timeout}}
+  extra_refs:
+  - org: kubernetes
+    repo: kops
+    base_ref: master
+    workdir: true
+    path_alias: k8s.io/kops
+  spec:
+    {%- if build_cluster != "default" %}
+    serviceAccountName: prowjob-default-sa
+    {%- endif %}
+    containers:
+    - command:
+      - runner.sh
+      args:
+      - ./tests/e2e/scenarios/{{ scenario }}/run-test.sh
+      env:
+      {%- for key, val in env.items() %}
+      - name: {{ key }}
+        value: "{{ val }}"
+      {%- endfor %}
+      image: {{image}}
+      imagePullPolicy: Always
+      resources:
+        limits:
+          cpu: "4"
+          memory: 6Gi
+        requests:
+          cpu: "4"
+          memory: 6Gi
+      securityContext:
+        privileged: true

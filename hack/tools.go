@@ -1,7 +1,8 @@
+//go:build tools
 // +build tools
 
 /*
-Copyright 2019 The Kubernetes Authors.
+Copyright 2021 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,8 +22,10 @@ package hack
 // Add tools that hack scripts depend on here, to ensure they are vendored.
 import (
 	_ "github.com/client9/misspell/cmd/misspell"
+	_ "github.com/go-bindata/go-bindata/v3"
 	_ "k8s.io/code-generator/cmd/client-gen"
 	_ "k8s.io/code-generator/cmd/deepcopy-gen"
 	_ "k8s.io/code-generator/cmd/informer-gen"
 	_ "k8s.io/code-generator/cmd/lister-gen"
+	_ "sigs.k8s.io/controller-tools/cmd/controller-gen"
 )

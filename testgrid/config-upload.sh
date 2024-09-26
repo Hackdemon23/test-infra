@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Copyright 2016 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,19 +16,23 @@
 set -o errexit
 set -o nounset
 set -o pipefail
-set -o xtrace
 
-TESTINFRA_ROOT=$(git rev-parse --show-toplevel)
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+cd "${REPO_ROOT}"
 
-for output in gs://k8s-testgrid-canary/config gs://k8s-testgrid/config; do
-  dir="$(dirname "${BASH_SOURCE}")"
-  bazel run //testgrid/cmd/configurator -- \
-    --gcp-service-account="/etc/service-account/service-account.json" \
-    --yaml="${TESTINFRA_ROOT}/config/testgrids" \
-    --default="${TESTINFRA_ROOT}/config/testgrids/default.yaml" \
-    --prow-config="${TESTINFRA_ROOT}/config/prow/config.yaml" \
-    --prow-job-config="${TESTINFRA_ROOT}/config/jobs/" \
-    --output="${output}" \
-    --oneshot \
-    --world-readable
+for output in gs://k8s-testgrid-canary/configs/k8s/config gs://k8s-testgrid/configs/k8s/config; do
+  (
+    set -o xtrace
+    go run ./testgrid/cmd/configurator \
+      --yaml="${REPO_ROOT}/config/testgrids" \
+      --default="${REPO_ROOT}/config/testgrids/default.yaml" \
+      --prow-config="${REPO_ROOT}/config/prow/config.yaml" \
+      --prow-job-config="${REPO_ROOT}/config/jobs/" \
+      --output="${output}" \
+      --prowjob-url-prefix="https://git.k8s.io/test-infra/config/jobs/" \
+      --update-description \
+      --oneshot \
+      --world-readable \
+      "$@"
+  )
 done

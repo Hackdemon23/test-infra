@@ -14,7 +14,7 @@ query: |
   select /* find the most recent time each job passed (may not be this week) */
     job,
     max(started) latest_pass
-  from `k8s-gubernator.build.all`
+  from `kubernetes-public.k8s_infra_kettle.all`
   where
     result = 'SUCCESS'
   group by job
@@ -25,19 +25,6 @@ jqfilter: |
   | {(.job): {
       latest_pass: (.latest_pass)
   }})] | add
-
-# JQ filter to make influxdb timeseries data points for Velodrome. (Optional)
-jqmeasurements: |
-  [(.[] | select((.latest_pass|length) > 0) | {
-    measurement: "latest_pass_time",
-    tags: {
-      job: (.job)
-    },
-    fields: {
-      job: (.job),
-      latest_pass: (.latest_pass)
-  }})]
-
 ```
 
 ## Metrics
@@ -51,10 +38,10 @@ jqmeasurements: |
 * failures - find jobs that have been failing the longest
     - [Config](configs/failures-config.yaml)
     - [failures-latest.json](http://storage.googleapis.com/k8s-metrics/failures-latest.json)
-* flakes - find the flakiest jobs this week (and the flakiest tests in each job).
+* flakes - find the flakiest jobs this week (and the flakiest tests in each job)
     - [Config](configs/flakes-config.yaml)
     - [flakes-latest.json](http://storage.googleapis.com/k8s-metrics/flakes-latest.json)
-* flakes-daily - find flakes from the previous day. Similar to `flakes`, but creates more granular results for display in Velodrome.
+* flakes-daily - find the flakiest jobs in the last 24h (and the flakiest tests in each job)
     - [Config](configs/flakes-daily-config.yaml)
     - [flakes-daily-latest.json](http://storage.googleapis.com/k8s-metrics/flakes-daily-latest.json)
 * job-health - compute daily health metrics for jobs (runs, tests, failure rate for each, duration percentiles)
@@ -69,17 +56,12 @@ jqmeasurements: |
 * weekly-consistency - compute overall weekly consistency for PRs
     - [Config](configs/weekly-consistency-config.yaml)
     - [weekly-consistency-latest.json](http://storage.googleapis.com/k8s-metrics/weekly-consistency-latest.json)
-* istio-job-flakes - compute overall weekly consistency for postsubmits
-    - [Config](configs/istio-flakes.yaml)
-    - [istio-job-flakes-latest.json](http://storage.googleapis.com/k8s-metrics/istio-job-flakes-latest.json)
 
 ## Adding a new metric
 
 To add a new metric, create a PR that adds a new yaml config file
 specifying the metric name (`metric`), the bigquery query to execute (`query`), and a
 jq filter to filter the data for the daily and latest files (`jqfilter`).
-*Optionally*: Include a jqfilter to extract influxdb timeseries measurements
-from the raw query results (`jqmeasurements`).
 
 Run `./bigquery.py --config configs/my-new-config.yaml` and verify that the
 output is what you expect.
@@ -87,6 +69,17 @@ output is what you expect.
 Add the new metric to the list above.
 
 After merging, find the new metric on GCS within 24 hours.
+
+## Testing Metrics
+The metrics executed in these queries are stored in [BigQuery](https://cloud.google.com/bigquery). The tables that hold k8s test data are populated by [Kettle](https://github.com/kubernetes/test-infra/blob/master/kettle/README.md) and live in the `k8s-gubernator` project of [Big Query Tables].
+
+From these tables open `k8s-gubernator` -> `build` -> `<table you care about>`
+- Click on `Query Table`
+- Build or Copy Query into the editor
+- Click `> Run`
+- The results will be visible in a table at the bottom
+
+You can see the last time a table was updated by selecting a table, and opening the `Details` tab. The `Last modified` field will show the last time this table was updated. If data is stale, please create an issue against `Kettle`.
 
 ## Details
 
@@ -99,9 +92,9 @@ the metric name and persist for a year after their creation. Additionally,
 the latest filtered results for a metric are stored in the root of the
 k8s-metrics bucket and named with the format `METRICNAME-latest.json`.
 
-If a config specifies the optional jq filter used to create influxdb timeseries
-data points, then the job will use the filter to generate timeseries points from
-the raw query results. The points are uploaded to [Velodrome](http://velodrome.k8s.io)'s influxdb instance where they can be used to create graphs and tables.
+## Query structure
+
+The `query` is written in `Standard SQL` which is really [BigQuery Standard SQL](https://cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax) that allows for working with arrays/repeated fields. Each sub-query, from the most indented out, will build a subtable that the outer query runs against. Any one of the sub query blocks can be run independently from the BigQuery console or optionally added to a test query config and run via the same `bigquery.py` line above.
 
 ## Consistency
 
@@ -110,3 +103,5 @@ example suppose we run a build of a job 5 times at the same commit:
 * 5 passing runs, 0 failing runs: consistent
 * 0 passing runs, 5 failing runs: consistent
 * 1-4 passing runs, 1-4 failing runs: inconsistent aka flaked
+
+[Big Query Tables]: https://console.cloud.google.com/bigquery?utm_source=bqui&utm_medium=link&utm_campaign=classic&project=k8s-gubernator

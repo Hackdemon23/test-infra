@@ -1,5 +1,12 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
+reviewers:
+- ahg-g
+- alculquicondor
+- Huang-Wei
 approvers:
-- bsalamat
-- k82cn
+- ahg-g
+- alculquicondor
+- Huang-Wei
+labels:
+- sig/scheduling

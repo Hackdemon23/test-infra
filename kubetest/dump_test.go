@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -161,7 +160,7 @@ func Test_logDumperNode_shellToFile(t *testing.T) {
 			stderr:  []byte(g.stderr),
 		})
 
-		tmpfile, err := ioutil.TempFile("", "")
+		tmpfile, err := os.CreateTemp("", "")
 		if err != nil {
 			t.Errorf("error creating temp file: %v", err)
 			continue
@@ -184,7 +183,7 @@ func Test_logDumperNode_shellToFile(t *testing.T) {
 			continue
 		}
 
-		actual, err := ioutil.ReadFile(tmpfile.Name())
+		actual, err := os.ReadFile(tmpfile.Name())
 		if err != nil {
 			t.Errorf("unexpected error reading file: %v", err)
 			continue
@@ -198,17 +197,7 @@ func Test_logDumperNode_shellToFile(t *testing.T) {
 }
 
 func Test_logDumperNode_dump(t *testing.T) {
-	tmpdir, err := ioutil.TempDir("", "")
-	if err != nil {
-		t.Errorf("error creating temp dir: %v", err)
-		return
-	}
-
-	defer func() {
-		if err := os.RemoveAll(tmpdir); err != nil {
-			t.Errorf("error removing temp dir: %v", err)
-		}
-	}()
+	tmpdir := t.TempDir()
 
 	host1Client := &mockSSHClient{}
 	host1Client.commands = append(host1Client.commands,
@@ -217,6 +206,9 @@ func Test_logDumperNode_dump(t *testing.T) {
 		},
 		&mockCommand{
 			command: "sudo journalctl --output=short-precise",
+		},
+		&mockCommand{
+			command: "sudo sysctl --all",
 		},
 		&mockCommand{
 			command: "sudo systemctl list-units -t service --no-pager --no-legend --all",
@@ -262,6 +254,7 @@ func Test_logDumperNode_dump(t *testing.T) {
 	if err != nil {
 		t.Errorf("error building logDumper: %v", err)
 	}
+	dumper.DumpSysctls = true
 
 	n, err := dumper.connectToNode(context.Background(), "nodename1", "host1")
 	if err != nil {
@@ -299,6 +292,7 @@ func Test_logDumperNode_dump(t *testing.T) {
 		"nodename1/kern.log",
 		"nodename1/journal.log",
 		"nodename1/kubelet.log",
+		"nodename1/sysctl.conf",
 		"nodename1/kube-controller-manager.log",
 		"nodename1/kube-controller-manager.log.1",
 		"nodename1/kube-controller-manager.log.2.gz",
@@ -368,10 +362,10 @@ func (m *mockSSHClient) ExecPiped(ctx context.Context, command string, stdout io
 		}
 		if c.command == command {
 			if _, err := stdout.Write(c.stdout); err != nil {
-				return fmt.Errorf("error writing to stdout: %v", err)
+				return fmt.Errorf("error writing to stdout: %w", err)
 			}
 			if _, err := stderr.Write(c.stderr); err != nil {
-				return fmt.Errorf("error writing to stderr: %v", err)
+				return fmt.Errorf("error writing to stderr: %w", err)
 			}
 			m.commands[i] = nil
 			return c.err

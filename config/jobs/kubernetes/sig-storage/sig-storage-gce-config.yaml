@@ -1,6 +1,7 @@
 presubmits:
   kubernetes/kubernetes:
   - name: pull-kubernetes-e2e-gce-storage-slow
+    cluster: k8s-infra-prow-build
     always_run: false
     optional: true
     # All the files owned by sig-storage. Keep in sync across
@@ -14,44 +15,52 @@ presubmits:
     # test/e2e/testing-manifests/storage-csi
     run_if_changed: '^(pkg\/controller\/volume|pkg\/kubelet\/volumemanager|pkg\/volume|pkg\/util\/mount|test\/e2e\/storage|test\/e2e\/testing-manifests\/storage-csi)'
     branches:
+    # TODO(releng): Remove once repo default branch has been renamed
     - master
+    - main
     labels:
       preset-service-account: "true"
       preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
+      preset-dind-enabled: "true"
       preset-pull-kubernetes-e2e: "true"
       preset-pull-kubernetes-e2e-gce: "true"
+    decorate: true
+    decoration_config:
+      timeout: 150m
+    path_alias: k8s.io/kubernetes
+    extra_refs:
+    - org: kubernetes
+      repo: release
+      base_ref: master
+      path_alias: k8s.io/release
     spec:
       containers:
-      - args:
-        - --root=/go/src
-        - --repo=k8s.io/kubernetes=$(PULL_REFS)
-        - --repo=k8s.io/release
-        - --upload=gs://kubernetes-jenkins/pr-logs
-        - --timeout=125
-        - --scenario=kubernetes_e2e
-        - --
-        - --build=bazel
+      - command:
+        - runner.sh
+        - /workspace/scenarios/kubernetes_e2e.py
+        args:
+        - --build=quick
         - --cluster=
-        - --extract=local
         - --gcp-node-image=gci
         - --gcp-zone=us-west1-b
         - --ginkgo-parallel=30
         - --provider=gce
-        - --runtime-config=batch/v2alpha1=true
-        - --stage=gs://kubernetes-release-pull/ci/pull-kubernetes-e2e-gce-storage-slow
-        - --test_args=--ginkgo.focus=\[sig-storage\].*\[Slow\] --ginkgo.skip=\[Serial\]|\[Disruptive\]|\[Flaky\]|\[Feature:.+\] --minStartupPods=8
-        - --timeout=80m
-        # Bazel needs privileged mode in order to sandbox builds.
+        - --test_args=--ginkgo.focus=\[sig-storage\].*\[Slow\] --ginkgo.skip=\[Driver:.gcepd\]|\[Serial\]|\[Disruptive\]|\[Flaky\]|\[Feature:.+\] --minStartupPods=8
+        - --timeout=120m
         securityContext:
           privileged: true
-        image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+        image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
         resources:
+          limits:
+            cpu: "4"
+            memory: "6Gi"
           requests:
+            cpu: "4"
             memory: "6Gi"
     annotations:
       testgrid-create-test-group: 'true'
   - name: pull-kubernetes-e2e-gce-storage-snapshot
+    cluster: k8s-infra-prow-build
     always_run: false
     optional: true
     # All the files owned by sig-storage. Keep in sync across
@@ -65,96 +74,51 @@ presubmits:
     # test/e2e/testing-manifests/storage-csi
     run_if_changed: '^(pkg\/controller\/volume|pkg\/kubelet\/volumemanager|pkg\/volume|pkg\/util\/mount|test\/e2e\/storage|test\/e2e\/testing-manifests\/storage-csi)'
     branches:
+    # TODO(releng): Remove once repo default branch has been renamed
     - master
+    - main
     labels:
       preset-service-account: "true"
       preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
+      preset-dind-enabled: "true"
       preset-pull-kubernetes-e2e: "true"
       preset-pull-kubernetes-e2e-gce: "true"
-    spec:
-      containers:
-      - args:
-        - --root=/go/src
-        - --repo=k8s.io/kubernetes=$(PULL_REFS)
-        - --repo=k8s.io/release
-        - --upload=gs://kubernetes-jenkins/pr-logs
-        - --timeout=125
-        - --scenario=kubernetes_e2e
-        - --
-        - --build=bazel
-        - --cluster=
-        - --extract=local
-        - --gcp-node-image=gci
-        - --gcp-zone=us-west1-b
-        - --provider=gce
-        - --runtime-config=batch/v2alpha1=true
-        - --stage=gs://kubernetes-release-pull/ci/pull-kubernetes-e2e-gce-storage-snapshot
-        - --test_args=--ginkgo.focus=\[sig-storage\].\[Feature:VolumeSnapshotDataSource\] --ginkgo.skip=\[Disruptive\]|\[Flaky\] --minStartupPods=8
-        - --timeout=80m
-        # Bazel needs privileged mode in order to sandbox builds.
-        securityContext:
-          privileged: true
-        image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        resources:
-          requests:
-            memory: "6Gi"
-    annotations:
-      testgrid-create-test-group: 'true'
-  - name: pull-kubernetes-e2e-gce-storage-slow-rbe
-    always_run: false
-    optional: true
-    # All the files owned by sig-storage. Keep in sync across
-    # all sig-storage-jobs
-    #
-    # pkg/controller/volume
-    # pkg/kubelet/volumemanager
-    # pkg/volume
-    # pkg/util/mount
-    # test/e2e/storage
-    # test/e2e/testing-manifests/storage-csi
-    run_if_changed: '^(pkg\/controller\/volume|pkg\/kubelet\/volumemanager|pkg\/volume|pkg\/util\/mount|test\/e2e\/storage|test\/e2e\/testing-manifests\/storage-csi)'
-    skip_report: true
     decorate: true
-    branches:
-    - master
-    labels:
-      preset-service-account: "true"
-      preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
-      preset-pull-kubernetes-e2e: "true"
-      preset-pull-kubernetes-e2e-gce: "true"
+    decoration_config:
+      timeout: 180m
     path_alias: k8s.io/kubernetes
     extra_refs:
-    - base_ref: master
-      org: kubernetes
+    - org: kubernetes
       repo: release
+      base_ref: master
       path_alias: k8s.io/release
-    - base_ref: master
-      org: kubernetes
-      repo: test-infra
-      path_alias: k8s.io/test-infra
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        command:
-        - ../test-infra/scenarios/kubernetes_e2e.py
+      - command:
+        - runner.sh
+        - /workspace/scenarios/kubernetes_e2e.py
         args:
-        - --inject-bazelrc=build --config=ci
-        - --build=bazel
+        - --build=quick
         - --cluster=
-        - --extract=local
         - --gcp-node-image=gci
         - --gcp-zone=us-west1-b
-        - --ginkgo-parallel=30
         - --provider=gce
-        - --runtime-config=batch/v2alpha1=true
-        - --stage=gs://kubernetes-release-pull/ci/pull-kubernetes-e2e-gce-storage-slow
-        - --test_args=--ginkgo.focus=\[sig-storage\].*\[Slow\] --ginkgo.skip=\[Serial\]|\[Disruptive\]|\[Flaky\]|\[Feature:.+\]| --minStartupPods=8
-        - --timeout=80m
+        - --test_args=--ginkgo.focus=\[Feature:VolumeSnapshotDataSource\] --ginkgo.skip=\[Disruptive\]|\[Flaky\] --minStartupPods=8
+        - --timeout=150m
+        securityContext:
+          privileged: true
+        image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+        resources:
+          limits:
+            cpu: "4"
+            memory: "6Gi"
+          requests:
+            cpu: "4"
+            memory: "6Gi"
     annotations:
       testgrid-create-test-group: 'true'
   - name: pull-kubernetes-e2e-gce-csi-serial
+    cluster: k8s-infra-prow-build
     always_run: false
     optional: true
     # All the files owned by sig-storage. Keep in sync across
@@ -168,219 +132,217 @@ presubmits:
     # test/e2e/testing-manifests/storage-csi
     run_if_changed: '^(pkg\/controller\/volume|pkg\/kubelet\/volumemanager|pkg\/volume|pkg\/util\/mount|test\/e2e\/storage|test\/e2e\/testing-manifests\/storage-csi)'
     branches:
+    # TODO(releng): Remove once repo default branch has been renamed
     - master
+    - main
     labels:
       preset-service-account: "true"
       preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
+      preset-dind-enabled: "true"
       preset-pull-kubernetes-e2e: "true"
       preset-pull-kubernetes-e2e-gce: "true"
+    decorate: true
+    decoration_config:
+      timeout: 170m
+    path_alias: k8s.io/kubernetes
+    extra_refs:
+    - org: kubernetes
+      repo: release
+      base_ref: master
+      path_alias: k8s.io/release
     spec:
       containers:
-      - args:
-        - --root=/go/src
-        - --repo=k8s.io/kubernetes=$(PULL_REFS)
-        - --repo=k8s.io/release
-        - --upload=gs://kubernetes-jenkins/pr-logs
-        - --timeout=150
-        - --scenario=kubernetes_e2e
-        - --
-        - --build=bazel
+      - command:
+        - runner.sh
+        - /workspace/scenarios/kubernetes_e2e.py
+        args:
+        - --build=quick
         - --cluster=
-        - --extract=local
         - --gcp-node-image=gci
         - --gcp-zone=us-west1-b
         - --provider=gce
-        - --runtime-config=batch/v2alpha1=true
-        - --stage=gs://kubernetes-release-pull/ci/pull-kubernetes-e2e-gce-csi-serial
         - --test_args=--ginkgo.focus=CSI.*(\[Serial\]|\[Disruptive\]) --ginkgo.skip=\[Flaky\]|\[Feature:.+\]|\[Slow\] --minStartupPods=8
-        - --timeout=120m
-        image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+        - --timeout=150m
+        image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
         resources:
-          requests:
+          limits:
+            cpu: "4"
             memory: "6Gi"
-    annotations:
-      testgrid-create-test-group: 'true'
-  - name: pull-kubernetes-e2e-gce-iscsi
-    always_run: false
-    optional: true
-    run_if_changed: '(pkg\/volume\/iscsi)'
-    branches:
-    - master
-    labels:
-      preset-service-account: "true"
-      preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
-      preset-pull-kubernetes-e2e: "true"
-      preset-pull-kubernetes-e2e-gce: "true"
-    spec:
-      containers:
-      - args:
-        - --root=/go/src
-        - --repo=k8s.io/kubernetes=$(PULL_REFS)
-        - --repo=k8s.io/release
-        - --upload=gs://kubernetes-jenkins/pr-logs
-        - --timeout=150
-        - --scenario=kubernetes_e2e
-        - --
-        - --build=bazel
-        - --cluster=
-        - --extract=local
-        - --gcp-node-image=ubuntu
-        - --image-family=ubuntu-gke-1804-lts-1
-        - --image-project=ubuntu-os-gke-cloud
-        - --gcp-zone=us-west1-b
-        - --provider=gce
-        - --ginkgo-parallel=30
-        - --runtime-config=batch/v2alpha1=true
-        - --stage=gs://kubernetes-release-pull/ci/pull-kubernetes-e2e-gce-iscsi
-        - --test_args=--ginkgo.focus=\[Driver:.iscsi\] --ginkgo.skip=\[Serial\]|\[Disruptive\]|\[Flaky\] --minStartupPods=8
-        - --timeout=120m
-        image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        resources:
           requests:
+            cpu: "4"
             memory: "6Gi"
-    annotations:
-      testgrid-create-test-group: 'true'
-  - name: pull-kubernetes-e2e-gce-iscsi-serial
-    always_run: false
-    optional: true
-    run_if_changed: '(pkg\/volume\/iscsi)'
-    branches:
-    - master
-    labels:
-      preset-service-account: "true"
-      preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
-      preset-pull-kubernetes-e2e: "true"
-      preset-pull-kubernetes-e2e-gce: "true"
-    spec:
-      containers:
-      - args:
-        - --root=/go/src
-        - --repo=k8s.io/kubernetes=$(PULL_REFS)
-        - --repo=k8s.io/release
-        - --upload=gs://kubernetes-jenkins/pr-logs
-        - --timeout=150
-        - --scenario=kubernetes_e2e
-        - --
-        - --build=bazel
-        - --cluster=
-        - --extract=local
-        - --gcp-node-image=ubuntu
-        - --image-family=ubuntu-gke-1804-lts-1
-        - --image-project=ubuntu-os-gke-cloud
-        - --gcp-zone=us-west1-b
-        - --provider=gce
-        - --runtime-config=batch/v2alpha1=true
-        - --stage=gs://kubernetes-release-pull/ci/pull-kubernetes-e2e-gce-iscsi-serial
-        - --test_args=--ginkgo.focus=\[Driver:.iscsi\].*(\[Serial\]|\[Disruptive\]) --ginkgo.skip=\[Flaky\] --minStartupPods=8
-        - --timeout=120m
-        image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-        resources:
-          requests:
-            memory: "6Gi"
-
+        securityContext:
+          privileged: true
     annotations:
       testgrid-create-test-group: 'true'
   - name: pull-kubernetes-e2e-gce-storage-disruptive
+    cluster: k8s-infra-prow-build
     always_run: false
     optional: true
     branches:
+    # TODO(releng): Remove once repo default branch has been renamed
     - master
+    - main
     labels:
       preset-service-account: "true"
       preset-k8s-ssh: "true"
-      preset-bazel-scratch-dir: "true"
+      preset-dind-enabled: "true"
       preset-pull-kubernetes-e2e: "true"
       preset-pull-kubernetes-e2e-gce: "true"
+    decorate: true
+    decoration_config:
+      timeout: 300m
+    path_alias: k8s.io/kubernetes
+    extra_refs:
+    - org: kubernetes
+      repo: release
+      base_ref: master
+      path_alias: k8s.io/release
     spec:
       containers:
-      - args:
-        - --root=/go/src
-        - --repo=k8s.io/kubernetes=$(PULL_REFS)
-        - --repo=k8s.io/release
-        - --upload=gs://kubernetes-jenkins/pr-logs
-        - --timeout=300
-        - --scenario=kubernetes_e2e
-        - --
-        - --build=bazel
+      - command:
+        - runner.sh
+        - /workspace/scenarios/kubernetes_e2e.py
+        args:
+        - --build=quick
         - --extract=local
         - --gcp-master-image=gci
         - --gcp-node-image=gci
         - --gcp-zone=us-west1-b
         - --provider=gce
-        - --stage=gs://kubernetes-release-pull/ci/pull-kubernetes-e2e-gce-storage-disruptive
-        - --test_args=--ginkgo.focus=\[sig-storage\].*\[Disruptive\] --ginkgo.skip=\[Flaky\] --minStartupPods=8
+        - --test_args=--ginkgo.focus=\[sig-storage\].*\[Disruptive\] --ginkgo.skip=\[Driver:.gcepd\]|\[Flaky\]|\[Feature:.+\] --minStartupPods=8
         - --timeout=240m
-        image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+        image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
         resources:
-          requests:
+          limits:
+            cpu: "4"
             memory: "6Gi"
+          requests:
+            cpu: "4"
+            memory: "6Gi"
+        securityContext:
+          privileged: true
     annotations:
       testgrid-create-test-group: 'true'
+  - name: pull-kubernetes-e2e-gce-storage-selinux
+    cluster: k8s-infra-prow-build
+    optional: true
+    always_run: false
+    skip_branches:
+      - release-\d+\.\d+ # per-release image
+    annotations:
+      description: Run tests with [Feature:SELinux] on a cluster with SELinux enabled.
+      fork-per-release: "true"
+      testgrid-create-test-group: "true"
+      testgrid-dashboards: presubmits-kubernetes-nonblocking
+      testgrid-alert-email: kubernetes-sig-storage-test-failures@googlegroups.com
+      testgrid-num-failures-to-alert: "10"
+    labels:
+      preset-k8s-ssh: "true"
+      preset-dind-enabled: "true"
+    decorate: true
+    decoration_config:
+      timeout: 150m
+    path_alias: k8s.io/kubernetes
+    extra_refs:
+    - org: kubernetes
+      repo: kops
+      base_ref: master
+      path_alias: k8s.io/kops
+    spec:
+      serviceAccountName: k8s-kops-test
+      containers:
+        - command:
+            - runner.sh
+          args:
+            - bash
+            - -xc
+            - |
+              make -C $GOPATH/src/k8s.io/kops test-e2e-install
+              kubetest2 kops -v=6 --cloud-provider=gce --up --down --build --env=KOPS_FEATURE_FLAGS=SELinuxMount \
+                --build-kubernetes=true --target-build-arch=linux/amd64 \
+                --admin-access=0.0.0.0/0 \
+                --kubernetes-feature-gates=SELinuxMount \
+                --kops-version-marker=https://storage.googleapis.com/k8s-staging-kops/kops/releases/markers/master/latest-ci.txt \
+                --create-args "--image='rhel-cloud/rhel-9-v20240815' --channel=alpha --networking=cilium --set=cluster.spec.containerd.selinuxEnabled=true --gce-service-account=default --set=spec.nodeProblemDetector.enabled=true --set=cluster.spec.cloudProvider.gce.useStartupScript=true" \
+                --test=kops \
+                -- \
+                --ginkgo-args="--debug" \
+                --timeout=120m \
+                --focus-regex="\[Feature:SELinux\]" \
+                --skip-regex="\[Feature:Volumes\]|\[Driver:.nfs\]|\[Driver:.local\]|\[Feature:SELinuxMountReadWriteOncePodOnly\]" \
+                --use-built-binaries=true \
+                --parallel=1 # [Feature:SELinux] tests include serial ones
+          image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+          resources:
+            limits:
+              cpu: 4
+              memory: "14Gi"
+            requests:
+              cpu: 4
+              memory: "14Gi"
+          securityContext:
+            privileged: true
 periodics:
 - interval: 24h
-  name: ci-kubernetes-e2e-gce-iscsi
-  labels:
-    preset-service-account: "true"
-    preset-k8s-ssh: "true"
-  spec:
-    containers:
-    - args:
-      - --timeout=150
-      - --bare
-      - --scenario=kubernetes_e2e
-      - --
-      - --check-leaked-resources
-      - --extract=ci/latest
-      - --gcp-node-image=ubuntu
-      - --image-family=ubuntu-gke-1804-lts-1
-      - --image-project=ubuntu-os-gke-cloud
-      - --gcp-zone=us-west1-b
-      - --provider=gce
-      - --ginkgo-parallel=30
-      - --test_args=--ginkgo.focus=\[Driver:.iscsi\] --ginkgo.skip=\[Serial\]|\[Disruptive\]|\[Flaky\] --minStartupPods=8
-      - --timeout=120m
-      image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
-  annotations:
-    testgrid-num-columns-recent: '20'
-- interval: 24h
   name: ci-kubernetes-e2e-gce-iscsi-serial
+  cluster: k8s-infra-prow-build
   labels:
     preset-service-account: "true"
     preset-k8s-ssh: "true"
+  decorate: true
+  decoration_config:
+    timeout: 150m
   spec:
     containers:
-    - args:
-      - --timeout=150
-      - --bare
-      - --scenario=kubernetes_e2e
-      - --
+    - command:
+      - runner.sh
+      - /workspace/scenarios/kubernetes_e2e.py
+      args:
       - --check-leaked-resources
-      - --extract=ci/latest
+      - --env=KUBE_UBUNTU_INSTALL_CONTAINERD_VERSION=v1.7.20
+      - --env=KUBE_UBUNTU_INSTALL_RUNC_VERSION=v1.1.13
+      - --env=LOG_DUMP_SYSTEMD_SERVICES=containerd
+      - --env=CONTAINER_RUNTIME_TEST_HANDLER=true
+      - --env=KUBE_MASTER_OS_DISTRIBUTION=ubuntu
+      - --env=KUBE_GCE_MASTER_IMAGE=ubuntu-2204-jammy-v20220712a
+      - --env=KUBE_GCE_MASTER_PROJECT=ubuntu-os-cloud
+      - --env=KUBE_NODE_OS_DISTRIBUTION=ubuntu
+      - --env=KUBE_GCE_NODE_IMAGE=ubuntu-2204-jammy-v20220712a
+      - --env=KUBE_GCE_NODE_PROJECT=ubuntu-os-cloud
+      - --extract=ci/fast/latest-fast
+      - --extract-ci-bucket=k8s-release-dev
+      - --gcp-master-image=ubuntu
       - --gcp-node-image=ubuntu
-      - --image-family=ubuntu-gke-1804-lts-1
-      - --image-project=ubuntu-os-gke-cloud
       - --gcp-zone=us-west1-b
       - --provider=gce
-      - --test_args=--ginkgo.focus=\[Driver:.iscsi\].*(\[Serial\]|\[Disruptive\]) --ginkgo.skip=\[Flaky\] --minStartupPods=8
+      - --test_args=--ginkgo.focus=\[Driver:.iscsi\] --ginkgo.skip=\[Flaky\] --minStartupPods=8
       - --timeout=120m
-      image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+      resources:
+        requests:
+          memory: "2000Mi"
+          cpu: 4000m
+        limits:
+          memory: "2000Mi"
+          cpu: 4000m
+      image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
   annotations:
     testgrid-num-columns-recent: '20'
 - interval: 24h
   name: ci-kubernetes-e2e-snapshot
+  cluster: k8s-infra-prow-build
   labels:
     preset-service-account: "true"
     preset-k8s-ssh: "true"
+  decorate: true
+  decoration_config:
+    timeout: 150m
   spec:
     containers:
-    - args:
-      - --timeout=150
-      - --bare
-      - --scenario=kubernetes_e2e
-      - --
+    - command:
+      - runner.sh
+      - /workspace/scenarios/kubernetes_e2e.py
+      args:
       - --check-leaked-resources
       - --extract=ci/latest
       - --gcp-node-image=gci
@@ -388,7 +350,14 @@ periodics:
       - --provider=gce
       - --test_args=--ginkgo.focus=\[Feature:VolumeSnapshotDataSource\] --ginkgo.skip=\[Disruptive\]|\[Flaky\] --minStartupPods=8
       - --timeout=120m
-      image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+      resources:
+        requests:
+          memory: "2000Mi"
+          cpu: 4000m
+        limits:
+          memory: "2000Mi"
+          cpu: 4000m
+      image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
   annotations:
     testgrid-num-columns-recent: '20'
     testgrid-num-failures-to-alert: '6'

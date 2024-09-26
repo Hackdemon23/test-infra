@@ -19,8 +19,9 @@ limitations under the License.
 // from the AST of a given file.
 //
 // Example:
-//	cm := NewCommentMap("example_config.go")
-
+//
+//	cm, err := NewCommentMap("example_config.go")
+//
 //	yamlSnippet, err := cm.GenYaml(&plugins.Configuration{
 //		Approve: []plugins.Approve{
 //			{
@@ -36,7 +37,11 @@ limitations under the License.
 //		},
 //	})
 //
-// 	yamlSnippet will be assigned a string containing the following YAML:
+// Alternatively, you can also use `PopulateStruct` to recursively fill all pointer fields, slices and maps of a struct via reflection:
+//
+// yamlSnippet, err := cm.GenYaml(PopulateStruct(&plugins.Configuration{}))
+//
+//	yamlSnippet will be assigned a string containing the following YAML:
 //
 //	# Approve is the configuration for the Approve plugin.
 //	approve:
@@ -56,7 +61,6 @@ limitations under the License.
 //
 //		# IgnoreReviewState causes the approve plugin to ignore the GitHub review state. Otherwise: * an APPROVE github review is equivalent to leaving an \"/approve\" message. * A REQUEST_CHANGES github review is equivalent to leaving an /approve cancel\" message.
 //		ignore_review_state: false
-//
 package genyaml
 
 import (
@@ -67,6 +71,7 @@ import (
 	"go/doc"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"strings"
@@ -89,17 +94,45 @@ type CommentMap struct {
 	sync.RWMutex
 }
 
-// NewCommentMap is the constructor for CommentMap accepting a variadic number of paths.
-func NewCommentMap(paths ...string) *CommentMap {
+// NewCommentMap is the constructor for CommentMap accepting a variadic number
+// of path and raw files contents.
+func NewCommentMap(rawFiles map[string][]byte, paths ...string) (*CommentMap, error) {
 	cm := &CommentMap{
 		comments: make(map[string]map[string]Comment),
 	}
 
-	for _, path := range paths {
-		cm.AddPath(path)
+	// Group files in dir assuming they are from the same package, this
+	// technically doesn't hold true all the time, but is the best effort to
+	// ensure that generated yamls are from the same package.
+	type group struct {
+		paths       []string
+		rawContents map[string][]byte
 	}
 
-	return cm
+	packageFiles := map[string]*group{}
+	for _, path := range paths {
+		dir := filepath.Dir(path)
+		if _, ok := packageFiles[dir]; !ok {
+			packageFiles[dir] = &group{}
+		}
+		packageFiles[dir].paths = append(packageFiles[dir].paths, path)
+	}
+
+	for path, content := range rawFiles {
+		dir := filepath.Dir(path)
+		if _, ok := packageFiles[dir]; !ok {
+			packageFiles[dir] = &group{}
+		}
+		packageFiles[dir].rawContents = map[string][]byte{path: content}
+	}
+
+	for pkg, files := range packageFiles {
+		if err := cm.addPackage(files.paths, files.rawContents); err != nil {
+			return nil, fmt.Errorf("failed to add files in %s: %w", pkg, err)
+		}
+	}
+
+	return cm, nil
 }
 
 // Comment is an abstract structure for storing parsed AST comments decorated with contextual information.
@@ -116,12 +149,12 @@ type Comment struct {
 func marshal(o interface{}) ([]byte, error) {
 	j, err := json.Marshal(o)
 	if err != nil {
-		return nil, fmt.Errorf("error marshaling into JSON: %v", err)
+		return nil, fmt.Errorf("error marshaling into JSON: %w", err)
 	}
 
 	y, err := jsonToYaml(j)
 	if err != nil {
-		return nil, fmt.Errorf("error converting JSON to YAML: %v", err)
+		return nil, fmt.Errorf("error converting JSON to YAML: %w", err)
 	}
 
 	return y, nil
@@ -145,25 +178,47 @@ func jsonToYaml(j []byte) ([]byte, error) {
 	return yaml3.Marshal(jsonObj)
 }
 
-// astFrom takes a path to a Go file and returns the abstract syntax tree (AST) for that file.
-func astFrom(path string) (*doc.Package, error) {
+// astFrom takes paths of Go files, or the content of Go files,
+// returns the abstract syntax tree (AST) for that file.
+func astFrom(paths []string, rawFiles map[string][]byte) (*doc.Package, error) {
 	fset := token.NewFileSet()
 	m := make(map[string]*ast.File)
 
-	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse file to AST from path: %s", path)
+	for _, file := range paths {
+		f, err := parser.ParseFile(fset, file, nil, parser.ParseComments)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse file to AST from path %s: %w", file, err)
+		}
+		m[file] = f
+	}
+	for fn, content := range rawFiles {
+		f, err := parser.ParseFile(fset, fn, content, parser.ParseComments)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse file to AST from raw content %s: %w", fn, err)
+		}
+		m[fn] = f
 	}
 
-	m[path] = f
-	apkg, _ := ast.NewPackage(fset, m, nil, nil)
+	// Copied from the go doc command: https://github.com/golang/go/blob/fc116b69e2004c159d0f2563c6e91ac75a79f872/src/go/doc/doc.go#L203
+	apkg, _ := ast.NewPackage(fset, m, simpleImporter, nil)
 
 	astDoc := doc.New(apkg, "", 0)
 	if astDoc == nil {
-		return nil, fmt.Errorf("unable to parse AST documentation from path: %s", path)
+		return nil, fmt.Errorf("unable to parse AST documentation from paths %v: got no doc", paths)
 	}
 
 	return astDoc, nil
+}
+
+func simpleImporter(imports map[string]*ast.Object, path string) (*ast.Object, error) {
+	pkg := imports[path]
+	if pkg == nil {
+		// note that strings.LastIndex returns -1 if there is no "/"
+		pkg = ast.NewObj(ast.Pkg, path[strings.LastIndex(path, "/")+1:])
+		pkg.Data = ast.NewScope(nil) // required by ast.NewPackage for dot-import
+		imports[path] = pkg
+	}
+	return pkg, nil
 }
 
 // fmtRawDoc formats/sanitizes a Go doc string removing TODOs, newlines, whitespace, and various other characters from the resultant string.
@@ -259,10 +314,10 @@ func getType(typ interface{}) string {
 }
 
 // genDocMap extracts the name of the field as it should appear in YAML format and returns the resultant string.
-func (cm *CommentMap) genDocMap(path string) error {
-	pkg, err := astFrom(path)
+func (cm *CommentMap) genDocMap(packageFiles []string, rawFiles map[string][]byte) error {
+	pkg, err := astFrom(packageFiles, rawFiles)
 	if err != nil {
-		return errors.New("unable to generate AST documentation map")
+		return fmt.Errorf("unable to generate AST documentation map: %w", err)
 	}
 
 	inlineFields := map[string][]string{}
@@ -332,6 +387,7 @@ func (cm *CommentMap) injectComment(parent *yaml3.Node, typeSpec []string, depth
 	}
 
 	typ := typeSpec[depth]
+	isArray := parent.Kind == yaml3.SequenceNode
 
 	// Decorate YAML node with comment.
 	if v, ok := cm.comments[typ][parent.Value]; ok {
@@ -360,8 +416,12 @@ func (cm *CommentMap) injectComment(parent *yaml3.Node, typeSpec []string, depth
 				}
 			}
 
-			// Recurse to inject comments on nested YAML nodes.
-			cm.injectComment(child, append(typeSpec, nxtTyp), depth+1)
+			// only recurse into the first element of an array, as documenting all further
+			// array items would be redundant
+			if !isArray || i == 0 {
+				// Recurse to inject comments on nested YAML nodes.
+				cm.injectComment(child, append(typeSpec, nxtTyp), depth+1)
+			}
 		}
 	}
 
@@ -378,37 +438,36 @@ func (cm *CommentMap) PrintComments() {
 	}
 }
 
-// AddPath allow for adding to the CommentMap via path specification to a `.go` file, returning a boolean indicating success.
-func (cm *CommentMap) AddPath(path string) bool {
+// addPackage allow for adding to the CommentMap via a list of paths to go files in the same package
+func (cm *CommentMap) addPackage(paths []string, rawFiles map[string][]byte) error {
 	cm.Lock()
 	defer cm.Unlock()
 
-	err := cm.genDocMap(path)
+	err := cm.genDocMap(paths, rawFiles)
 	if err != nil {
-		return false
+		return err
 	}
 
-	return true
-}
-
-// SetPath allow for setting of the CommentMap via path specification to a `.go` file, returning a boolean indicating success.
-func (cm *CommentMap) SetPath(path string) bool {
-	cm.Lock()
-	defer cm.Unlock()
-
-	// Empty map.
-	cm.comments = make(map[string]map[string]Comment)
-
-	err := cm.genDocMap(path)
-	if err != nil {
-		return false
-	}
-
-	return true
+	return nil
 }
 
 // GenYaml generates a fully commented YAML snippet for a given plugin configuration.
 func (cm *CommentMap) GenYaml(config interface{}) (string, error) {
+	var buffer bytes.Buffer
+
+	encoder := yaml3.NewEncoder(&buffer)
+
+	err := cm.EncodeYaml(config, encoder)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode config as YAML: %w", err)
+	}
+
+	return buffer.String(), nil
+}
+
+// EncodeYaml encodes a fully commented YAML snippet for a given plugin configuration
+// using the given encoder.
+func (cm *CommentMap) EncodeYaml(config interface{}, encoder *yaml3.Encoder) error {
 	cm.RLock()
 	defer cm.RUnlock()
 
@@ -417,23 +476,17 @@ func (cm *CommentMap) GenYaml(config interface{}) (string, error) {
 	// Convert Config object to an abstract YAML node.
 	y1, err := marshal(&config)
 	if err != nil {
-		return "", errors.New("failed to marshal config to yaml")
+		return fmt.Errorf("failed to marshal config to yaml: %w", err)
 	}
 
 	node := yaml3.Node{}
 	err = yaml3.Unmarshal([]byte(y1), &node)
 	if err != nil {
-		return "", errors.New("failed to unmarshal yaml to yaml node")
+		return errors.New("failed to unmarshal yaml to yaml node")
 	}
 
 	// Inject comments
 	cm.injectComment(&node, []string{baseTypeSpec}, 0)
 
-	// Convert Yaml w/ comments to string.
-	y2, err := yaml3.Marshal(&node)
-	if err != nil {
-		return "", errors.New("failed to marshal yaml node to yaml")
-	}
-
-	return string(y2), nil
+	return encoder.Encode(&node)
 }

@@ -1,10 +1,11 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
+reviewers:
+- andrewsykim
+- cheftako
 approvers:
 - andrewsykim
 - cheftako
-- hogepodge
-- justaugustus
 
 labels:
 - sig/cloud-provider

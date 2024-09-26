@@ -1,10 +1,20 @@
 # See the OWNERS docs at https://go.k8s.io/owners
 
+reviewers:
+- adelina-t
+- andyzhangx
+- feiskyer
+- sig-windows-leads
 approvers:
 - adelina-t
 - andyzhangx
-- bclau
-- chewong
 - feiskyer
-- marosset
-- PatrickLang
+- sig-windows-leads
+emeritus_approvers:
+- benmoss
+- chewong
+- ddebroy
+- jayunit100
+
+labels:
+- sig/windows

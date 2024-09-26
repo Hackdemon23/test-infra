@@ -1,31 +1,48 @@
-apiVersion: extensions/v1beta1
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kettle
+  namespace: kettle
+  labels:
+    app: kettle
+  annotations:
+    iam.gke.io/gcp-service-account: kettle@kubernetes-public.iam.gserviceaccount.com
+---
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kettle
+  namespace: kettle
 spec:
   replicas: 1
+  selector:
+    matchLabels:
+      app: kettle
   template:
     metadata:
       labels:
         app: kettle
     spec:
+      serviceAccountName: kettle
       containers:
       - name: kettle
-        image: gcr.io/k8s-testimages/kettle:latest
+        image: gcr.io/k8s-staging-infra-tools/kettle:latest
         imagePullPolicy: Always
         env:
-        - name: GOOGLE_APPLICATION_CREDENTIALS
-          value: /etc/service-account/service-account.json
+        - name: DEPLOYMENT
+          value: prod
+        - name: SUBSCRIPTION_PATH
+          value: kubernetes-jenkins/gcs-changes/kettle-filtered
+        resources:
+          requests:
+            memory: 4Gi
+          limits:
+            memory: 12Gi
         volumeMounts:
-        - name: service
-          mountPath: /etc/service-account
-          readOnly: true
         - name: data
           mountPath: /data
       volumes:
-      - name: service
-        secret:
-          secretName: kettle-service-account
       - name: data
         persistentVolumeClaim:
           claimName: kettle-data

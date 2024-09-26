@@ -1,5 +1,6 @@
 periodics:
-- name: ci-test-infra-bazel
+- name: ci-test-infra-continuous-test
+  cluster: k8s-infra-prow-build
   decorate: true
   extra_refs:
   - org: kubernetes
@@ -7,128 +8,29 @@ periodics:
     base_ref: master
   interval: 1h
   labels:
-    preset-service-account: "true"
-    preset-bazel-scratch-dir: "true"
+    # Enable dind for linters that required docker to run, for example typescript.
+    preset-dind-enabled: "true"
   spec:
     containers:
-    - image: launcher.gcr.io/google/bazel:0.29.1
+    - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-test-infra
       command:
-      - hack/bazel.sh
+      - runner.sh
       args:
+      - make
       - test
-      - --config=ci
-      - --nobuild_tests_only
-      - //...
+      - verify
+      # docker-in-docker needs privileged mode
+      securityContext:
+        privileged: true
+      resources:
+        limits:
+          cpu: 2
+          memory: 4Gi
+        requests:
+          cpu: 2
+          memory: 4Gi
   annotations:
     testgrid-dashboards: sig-testing-misc
-    testgrid-tab-name: ci-bazel
-    description: Runs bazel test //... on the test-infra repo every hour
-
-- name: ci-test-infra-triage
-  decorate: true
-  interval: 30m
-  spec:
-    containers:
-    - image: gcr.io/k8s-testimages/triage:latest
-      imagePullPolicy: Always
-      env:
-      - name: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/service-account/service-account.json
-      command:
-      - "timeout"
-      args:
-      - "-t"
-      - "10800"
-      - "/update_summaries.sh"
-      volumeMounts:
-      - name: service
-        mountPath: /etc/service-account
-        readOnly: true
-    volumes:
-    - name: service
-      secret:
-        secretName: triage-service-account
-  annotations:
-    testgrid-num-failures-to-alert: '18'
-    testgrid-alert-stale-results-hours: '12'
-    testgrid-dashboards: sig-testing-misc
-    testgrid-tab-name: triage
-    testgrid-alert-email: kubernetes-sig-testing-alerts@googlegroups.com, k8s-infra-oncall@google.com
-    description: Runs BigQuery queries, summarizes results into clusters, and uploads to GCS for go.k8s.io/triage
-- name: metrics-bigquery
-  interval: 24h
-  spec:
-    containers:
-    - image: gcr.io/k8s-testimages/bigquery:v20191004-77e27616c
-      args:
-      - --scenario=execute
-      - --
-      - test-infra/metrics/bigquery.py
-      - --
-      - --bucket=gs://k8s-metrics
-      - --backfill-days=90
-      env:
-      - name: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/service-account/service-account.json
-      - name: VELODROME_INFLUXDB_CONFIG
-        value: /etc/velodrome-influxdb/config.json
-      volumeMounts:
-      - name: service
-        mountPath: /etc/service-account
-        readOnly: true
-      - name: influxdb
-        mountPath: /etc/velodrome-influxdb
-        readOnly: true
-    volumes:
-    - name: service
-      secret:
-        secretName: triage-service-account
-    - name: influxdb
-      secret:
-        secretName: velodrome-influxdb
-  annotations:
-    testgrid-dashboards: sig-testing-misc
-    testgrid-alert-email: kubernetes-sig-testing-alerts@googlegroups.com, k8s-infra-oncall@google.com
-    testgrid-num-failures-to-alert: '2'
-    description: Runs BigQuery queries to generate data for metrics.
-
-- name: metrics-kettle
-  interval: 1h
-  spec:
-    containers:
-    - image: gcr.io/k8s-testimages/bigquery:v20191004-77e27616c
-      args:
-      - --scenario=execute
-      - --
-      - test-infra/kettle/monitor.py
-      - --
-      - --stale=6
-      - --table
-      - k8s-gubernator:build.all
-      - k8s-gubernator:build.week
-      - k8s-gubernator:build.day
-      env:
-      - name: GOOGLE_APPLICATION_CREDENTIALS
-        value: /etc/service-account/service-account.json
-      - name: VELODROME_INFLUXDB_CONFIG
-        value: /etc/velodrome-influxdb/config.json
-      volumeMounts:
-      - name: service
-        mountPath: /etc/service-account
-        readOnly: true
-      - name: influxdb
-        mountPath: /etc/velodrome-influxdb
-        readOnly: true
-    volumes:
-    - name: service
-      secret:
-        secretName: triage-service-account
-    - name: influxdb
-      secret:
-        secretName: velodrome-influxdb
-  annotations:
-    testgrid-num-failures-to-alert: '6'
-    testgrid-alert-stale-results-hours: '12'
-    testgrid-dashboards: sig-testing-misc
-    testgrid-alert-email: kubernetes-sig-testing-alerts@googlegroups.com, k8s-infra-oncall@google.com
-    description: Monitors Kettle's BigQuery database freshness.
+    testgrid-tab-name: continuous
+    testgrid-broken-column-threshold: '0.5'
+    description: Runs `make test verify` on the test-infra repo every hour

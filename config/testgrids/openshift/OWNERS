@@ -1,6 +1,13 @@
-approvers:
-- stevekuznetsov
-- smarterclayton
+reviewers:
 - droslean
 - hongkailiu
-- petr-muller
+- jmguzik
+- smg247
+- jeremyeder
+
+approvers:
+- droslean
+- hongkailiu
+- jmguzik
+- smg247
+- jeremyeder

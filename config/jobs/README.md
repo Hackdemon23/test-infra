@@ -10,10 +10,10 @@ This document attempts to be a step-by-step, copy-pastable guide to the use
 of prow jobs for the Kubernetes project. It may fall out of date. For more
 info, it was sourced from the following:
 
-- [ProwJob docs](/prow/jobs.md)
-- [Life of a Prow Job](/prow/life_of_a_prow_job.md)
-- [Pod Utilities](/prow/pod-utilities.md)
-- [How to Test a Prow Job](/prow/build_test_update.md#How-to-test-a-ProwJob)
+- [ProwJob docs](https://docs.prow.k8s.io/docs/jobs/)
+- [Life of a Prow Job](https://docs.prow.k8s.io/docs/life-of-a-prow-job/)
+- [Pod Utilities](https://docs.prow.k8s.io/docs/components/pod-utilities/)
+- [How to Test a Prow Job](https://docs.prow.k8s.io/docs/build-test-update/#how-to-test-a-prowjob)
 
 ### Job Types
 
@@ -23,7 +23,7 @@ There are three types of prow jobs:
 - **Postsubmits** run after merging code
 - **Periodics** run on a periodic basis
 
-Please see [ProwJob docs](/prow/jobs.md) for more info
+Please see [ProwJob docs](https://docs.prow.k8s.io/docs/jobs/) for more info
 
 ### Job Images
 
@@ -42,17 +42,14 @@ than needed, and will be periodically bumped by PRs. These are sources of
 technical debt that are often not very well maintained. Use at your own risk,
 eg:
 
-- [pull-community-verify] uses `gcr.io/k8s-testimages/gcloud-in-go:v20190125`
-  to run `make verify`, which ends up invoking some `bash` scripts, which use
-  commands like `git` and `go`. The `gcloud` dependency is not needed at all.
-- [periodic-kubernetes-e2e-packages-pushed] uses `gcr.io/k8s-testimages/kubekins:latest-master`
+- [periodic-kubernetes-e2e-packages-pushed] uses `gcr.io/k8s-staging-test-infra/kubekins:latest-master`
   to run `./tests/e2e/packages/verify_packages_published.sh` which ends up
   running `apt-get` and `yum` commands. Perhaps a `debian` image would be
   better.
 
 ## Job Presets
 
-Prow supports [Presets](/prow/jobs.md#presets) to define and patch in common
+Prow supports [Presets](https://docs.prow.k8s.io/docs/jobs/#presets) to define and patch in common
 env vars and volumes used for credentials or common job config. Some are
 defined centrally in [`config/prow/config.yaml`], while others can be defined in
 files here. eg:
@@ -62,9 +59,18 @@ files here. eg:
 - [`preset-pull-kubernetes-e2e: "true"`] sets environment variables to make
   kubernetes e2e tests less susceptible to flakes
 - [`preset-aws-credentials: "true"`] ensures the prowjob has AWS credentials
-  for kops tests in a well known location, with an env var pointint to it
+  for kops tests in a well known location, with an env var pointing to it
 - [the default preset with no labels] is used to set the `GOPROXY` env var
   for all jobs by default
+
+## Secrets
+
+Prow jobs can use secrets located in the same namespace within the cluster
+where the jobs are executed, by using the [same mechanism of
+podspec](https://kubernetes.io/docs/concepts/configuration/secret/#using-a-secret).
+The secrets used in prow jobs can be source controlled and synced from any major
+secret manager provider, such as google secret manager, see
+[prow_secret](https://docs.prow.k8s.io/docs/prow-secrets/) for instructions.
 
 ## Job Examples
 
@@ -89,7 +95,7 @@ presubmits:
     always_run: true
     spec:
       containers:
-      - image: golang:1.12.5
+      - image: public.ecr.aws/docker/library/golang:1.12.5
         command:
         - /bin/bash
         args:
@@ -130,7 +136,7 @@ periodics:
     path_alias: "sigs.k8s.io/cluster-api-provider-aws"
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20190618-b782256-1.15
+    - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
       command:
       - "./scripts/ci-aws-cred-test.sh"
 ```
@@ -142,10 +148,10 @@ periodics:
     - For kubernetes/kubernetes we prefer `kubernetes/sig-foo/filename.yaml`
     - Ensure `filename.yaml` is unique across the config subdir; prow uses this as a key in its configmap
 1. Ensure an [`OWNERS`](https://go.k8s.io/owners) file exists in the directory for job, and has appropriate approvers/reviewers
-1. Write or edit the job config (please see [how-to-add-new-jobs](/prow/jobs.md#how-to-configure-new-jobs))
-1. Ensure the job is configured to to display its results in [testgrid.k8s.io]
+1. Write or edit the job config (please see [How to configure new jobs](https://docs.prow.k8s.io/docs/jobs/#how-to-configure-new-jobs))
+1. Ensure the job is configured to display its results in [testgrid.k8s.io]
     - The simple way: add [testgrid annotations]
-    - Please see the testgrid [documentation](/testgrid/config.md) for more details on configuation options
+    - Please see the testgrid [documentation](/testgrid/config.md) for more details on configuration options
 1. Open a PR with the changes; when it merges [@k8s-ci-robot] will deploy the changes automatically
 
 ## Deleting Jobs
@@ -155,21 +161,29 @@ periodics:
 1. If the job had no [testgrid annotations], ensure its [`testgrid/config.yaml`] entries are gone
 1. Open a PR with the changes; when it merges [@k8s-ci-robot] will deploy the changes automatically
 
-## Testing Jobs Locally
+## Testing Jobs
 
-Please try using [`phaino`](/prow/cmd/phaino/README.md), it will interactively
-help you run a docker command that approximates the pod that would be scheduled
-on behalf of an actual prow job.
+You can read about how to test changes to ProwJobs both locally and remotely in the [prow documentation](https://docs.prow.k8s.io/docs/build-test-update/#how-to-test-a-prowjob).
 
-## Testing Jobs Remotely
+### Testing Jobs Remotely
 
-This requires a running instance of prow. In general we discourage the use of
+This requires a running instance of prow. In general, we discourage the use of
 [prow.k8s.io] as a testbed for job development, and recommend the use of your
 own instance of prow for faster iteration. That said, an approach that people
 have used in the past with mostly-there jobs is to iterate via PRs; just
 recognize this is going to depend on review latency.
 
-For more details, please refer to [How to Test a ProwJob](/prow/build_test_update.md#how-to-test-a-prowjob)
+## Running a Production Job
+
+Normally prow will automatically schedule your job, however if for some reason you
+need to trigger it again and are a Prow administrator you have a few options:
+
+- you can use the rerun feature in prow.k8s.io to run the job again *with the same config*
+- you can use [`config/mkpj.sh`](/config/mkpj.sh) to create a prowjob CR from your local config
+- you can use `bazel run //prow/cmd/mkpj -- --job=foo ...` to create a prowjob CR from your local config
+
+For the latter two options you'll need to submit the resulting CR via `kubectl` configured against
+the prow services cluster.
 
 ## Generated Jobs
 
@@ -180,25 +194,27 @@ than in this central README, but here we are for now.
 ### image-validation jobs
 
 These test different master/node image versions against multiple k8s branches. If you
-want to change these, update [`experiment/test_config.yaml`](/experiment/test_config.yaml)
+want to change these, update [`releng/test_config.yaml`](/releng/test_config.yaml)
 and then run
 
-```
-bazel run //experiment:generate_tests -- --yaml-config-path=experiment/test_config.yaml
+```sh
+# from test-infra root
+$ ./hack/update-generated-tests.sh
 ```
 
 ### release-branch jobs
 
 When a release branch of kubernetes is first cut, the current set of master jobs
-must be forked to use the new release branch. Use [`experiment/config-forker`] to
+must be forked to use the new release branch. Use [`releng/config-forker`] to
 accomplish this, eg:
 
-```
+```sh
 # from test-infra root
-bazel run //experiment/config-forker -- \
+$ go run ./releng/config-forker \
   --job-config $(pwd)/config/jobs \
-  --version 1.15 \
-  --output $(pwd)/config/jobs/kubernetes/sig-release/release-branch-jobs/1.15.yaml
+  --version 1.27 \
+  --go-version 1.20.2 \
+  --output $(pwd)/config/jobs/kubernetes/sig-release/release-branch-jobs/1.27.yaml
 ```
 
 [prow.k8s.io]: https://prow.k8s.io
@@ -206,7 +222,7 @@ bazel run //experiment/config-forker -- \
 [testgrid annotations]: /testgrid/config.md#prow-job-configuration
 [testgrid.k8s.io]: https://testgrid.k8s.io
 
-[`experiment/config-forker`]: /experiment/config-forker
+[`releng/config-forker`]: /releng/config-forker
 [`images/`]: /images
 
 [periodic-kubernetes-e2e-packages-pushed]: https://github.com/kubernetes/test-infra/blob/688d365adf7f71e33a4249c7b90d7e84c105dfc5/config/jobs/kubernetes/sig-cluster-lifecycle/packages.yaml#L3-L16

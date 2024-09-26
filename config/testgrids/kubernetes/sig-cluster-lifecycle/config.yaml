@@ -3,57 +3,84 @@ dashboard_groups:
   dashboard_names:
     - sig-cluster-lifecycle-all
     - sig-cluster-lifecycle-kubeadm
-    - sig-cluster-lifecycle-multi-platform
+    - sig-cluster-lifecycle-cluster-addons
     - sig-cluster-lifecycle-cluster-api
+    - sig-cluster-lifecycle-cluster-api-1.6
+    - sig-cluster-lifecycle-cluster-api-1.7
+    - sig-cluster-lifecycle-cluster-api-1.8
+    - sig-cluster-lifecycle-cluster-api-addon-provider-helm
     - sig-cluster-lifecycle-cluster-api-provider-aws
+    - sig-cluster-lifecycle-cluster-api-provider-aws-2.0
     - sig-cluster-lifecycle-cluster-api-provider-azure
     - sig-cluster-lifecycle-cluster-api-provider-digitalocean
     - sig-cluster-lifecycle-cluster-api-provider-vsphere
     - sig-cluster-lifecycle-cluster-api-provider-gcp
     - sig-cluster-lifecycle-cluster-api-provider-ibmcloud
     - sig-cluster-lifecycle-cluster-api-provider-openstack
-    - sig-cluster-lifecycle-cluster-api-bootstrap-provider-kubeadm
-    - sig-cluster-lifecycle-cluster-api-provider-docker
+    - sig-cluster-lifecycle-cluster-api-provider-cloudstack
+    - sig-cluster-lifecycle-cluster-api-provider-nested
+    - sig-cluster-lifecycle-cluster-api-operator-0.13
+    - sig-cluster-lifecycle-cluster-api-operator
     - sig-cluster-lifecycle-kops
-    - sig-cluster-lifecycle-etcdadm
     - sig-cluster-lifecycle-image-pushes
     - sig-cluster-lifecycle-system-validators
+    - sig-cluster-lifecycle-kubespray
+    - sig-cluster-lifecycle-image-builder
+    - sig-cluster-lifecycle-kubeup-to-kops
 
 dashboards:
 - name: sig-cluster-lifecycle-all
 - name: sig-cluster-lifecycle-kubeadm
-- name: sig-cluster-lifecycle-multi-platform
-  dashboard_tab:
-    - name: periodic-kubeadm-gce-amd64
-      test_group_name: periodic-multi-platform-kubeadm-gce-amd64
-    - name: periodic-kubeadm-scaleway-arm
-      test_group_name: periodic-multi-platform-kubeadm-scaleway-arm
-    - name: periodic-kubeadm-scaleway-arm64
-      test_group_name: periodic-multi-platform-kubeadm-scaleway-arm64
-    - name: periodic-kubeadm-packet-arm64
-      test_group_name: periodic-multi-platform-kubeadm-packet-arm64
+- name: sig-cluster-lifecycle-cluster-addons
 - name: sig-cluster-lifecycle-cluster-api
+- name: sig-cluster-lifecycle-cluster-api-1.6
+- name: sig-cluster-lifecycle-cluster-api-1.7
+- name: sig-cluster-lifecycle-cluster-api-1.8
+- name: sig-cluster-lifecycle-cluster-api-addon-provider-helm
+- name: sig-cluster-lifecycle-cluster-api-provider-aws-2.0
 - name: sig-cluster-lifecycle-cluster-api-provider-aws
+  dashboard_tab:
+    - name: periodic-test-coverage-main
+      test_group_name: periodic-cluster-api-provider-aws-coverage
+      base_options: "exclude-filter-by-regex=Overall$&group-by-directory=&expand-groups=&sort-by-name="
 - name: sig-cluster-lifecycle-cluster-api-provider-azure
+  dashboard_tab:
+    - name: capz-periodic-coverage-main
+      test_group_name: periodic-cluster-api-provider-azure-coverage
+      base_options: "exclude-filter-by-regex=Overall$&group-by-directory=&expand-groups=&sort-by-name="
 - name: sig-cluster-lifecycle-cluster-api-provider-digitalocean
 - name: sig-cluster-lifecycle-cluster-api-provider-gcp
 - name: sig-cluster-lifecycle-cluster-api-provider-ibmcloud
+  dashboard_tab:
+    - name: capibm-periodic-coverage-main
+      test_group_name: periodic-cluster-api-provider-ibmcloud-coverage
+      base_options: "exclude-filter-by-regex=Overall$&group-by-directory=&expand-groups=&sort-by-name="
+    - name: capibm-pr-coverage-main
+      test_group_name: pull-cluster-api-provider-ibmcloud-coverage
+      base_options: "exclude-filter-by-regex=Overall$&group-by-directory=&expand-groups=&sort-by-name="
 - name: sig-cluster-lifecycle-cluster-api-provider-vsphere
 - name: sig-cluster-lifecycle-cluster-api-provider-openstack
-- name: sig-cluster-lifecycle-cluster-api-bootstrap-provider-kubeadm
-- name: sig-cluster-lifecycle-cluster-api-provider-docker
+- name: sig-cluster-lifecycle-cluster-api-provider-cloudstack
+- name: sig-cluster-lifecycle-cluster-api-provider-nested
+- name: sig-cluster-lifecycle-cluster-api-operator-0.13
+- name: sig-cluster-lifecycle-cluster-api-operator
 - name: sig-cluster-lifecycle-kops
-- name: sig-cluster-lifecycle-etcdadm
 - name: sig-cluster-lifecycle-image-pushes
 - name: sig-cluster-lifecycle-system-validators
+- name: sig-cluster-lifecycle-kubespray
+- name: sig-cluster-lifecycle-image-builder
+- name: sig-cluster-lifecycle-kubeup-to-kops
 
 test_groups:
-# @luxas' multiarch e2e results
-- name: periodic-multi-platform-kubeadm-gce-amd64
-  gcs_prefix: kubernetes-multiarch-e2e-results/logs/kubeadm-luxas-gce-amd64
-- name: periodic-multi-platform-kubeadm-scaleway-arm
-  gcs_prefix: kubernetes-multiarch-e2e-results/logs/kubeadm-luxas-scaleway-arm
-- name: periodic-multi-platform-kubeadm-scaleway-arm64
-  gcs_prefix: kubernetes-multiarch-e2e-results/logs/kubeadm-luxas-scaleway-arm64
-- name: periodic-multi-platform-kubeadm-packet-arm64
-  gcs_prefix: kubernetes-multiarch-e2e-results/logs/kubeadm-luxas-packet-arm64
+- name: periodic-cluster-api-provider-azure-coverage
+  gcs_prefix: kubernetes-ci-logs/logs/periodic-cluster-api-provider-azure-coverage
+  short_text_metric: coverage
+- name: periodic-cluster-api-provider-aws-coverage
+  gcs_prefix: kubernetes-ci-logs/logs/periodic-cluster-api-provider-aws-coverage
+  short_text_metric: coverage
+- name: periodic-cluster-api-provider-ibmcloud-coverage
+  gcs_prefix: kubernetes-ci-logs/logs/periodic-cluster-api-provider-ibmcloud-coverage
+  short_text_metric: coverage
+- name: pull-cluster-api-provider-ibmcloud-coverage
+  gcs_prefix: kubernetes-ci-logs/logs/pull-cluster-api-provider-ibmcloud-coverage
+  short_text_metric: coverage

@@ -1,13 +1,13 @@
 # Image pushing jobs
 
 This directory contains jobs that run in the trusted cluster and kick off GCB
-jobs that then push images to staging GCR repos. These jobs are the recommended
+jobs that then push images to staging GCR/AR repos. These jobs are the recommended
 way to regularly publish images to staging.
 
 ## Getting started
 
 You'll need a staging GCR. If you don't have one,
-[instructions are over here][gcr instructions]. Once you have one, there are two
+[instructions are over here][registry instructions]. Once you have one, there are two
 components two getting set up:
 
 * A `cloudbuild.yaml` file in your repo, customised to build your images in
@@ -19,7 +19,7 @@ components two getting set up:
 
 The contents of `cloudbuild.yaml` depends on how your repo produces images.
 The [official documentation][gcb documentation] discusses these in the general
-case. If your image can be built using `go build` or Bazel and pushed using
+case. If your image can be built using `go build` and pushed using
 `docker push`, that advice should be sufficient.
 
 ### Custom substitutions
@@ -59,6 +59,9 @@ steps:
     - --tag=gcr.io/$PROJECT_ID/some-image:$_GIT_TAG
     - --tag=gcr.io/$PROJECT_ID/some-image:latest
     - .
+    # default cloudbuild has HOME=/builder/home and docker buildx is in /root/.docker/cli-plugins/docker-buildx
+    # set the home to /root explicitly to if using docker buildx
+    # - HOME=/root
 substitutions:
   _GIT_TAG: '12345'
   _PULL_BASE_REF: 'master'
@@ -75,7 +78,7 @@ images:
 ### Makefile build example
 
 If your build process is driven by a Makefile or similar, you can use GCB to
-invoke that. We provide the [`gcr.io/k8s-testimages/gcb-docker-gcloud` image][gcb-docker-gcloud],
+invoke that. We provide the [`gcr.io/k8s-staging-test-infra/gcb-docker-gcloud` image][gcb-docker-gcloud],
 which contains components that are likely to be useful for your builds. A sample
 `cloudbuild.yaml` using `make` to build and push might look like this:
 
@@ -89,7 +92,7 @@ timeout: 1200s
 options:
   substitution_option: ALLOW_LOOSE
 steps:
-  - name: 'gcr.io/k8s-testimages/gcb-docker-gcloud:v20190906-745fed4'
+  - name: 'gcr.io/k8s-staging-test-infra/gcb-docker-gcloud:v20190906-745fed4'
     entrypoint: make
     env:
     - DOCKER_CLI_EXPERIMENTAL=enabled
@@ -125,7 +128,7 @@ postsubmits:
   kubernetes-sigs/some-repo-name:
     # The name should be changed to match the repo name above
     - name: post-some-repo-name-push-images
-      cluster: test-infra-trusted
+      cluster: k8s-infra-prow-build-trusted
       annotations:
         # This is the name of some testgrid dashboard to report to.
         # If this is the first one for your sig, you may need to create one
@@ -137,8 +140,9 @@ postsubmits:
       branches:
         - ^master$
       spec:
+        serviceAccountName: gcb-builder
         containers:
-          - image: gcr.io/k8s-testimages/image-builder:v20190906-d5d7ce3
+          - image: gcr.io/k8s-staging-test-infra/image-builder:v20210913-fc7c4e84f6
             command:
               - /run.sh
             args:
@@ -149,19 +153,15 @@ postsubmits:
               - --scratch-bucket=gs://k8s-staging-cluster-api-gcb
               - --env-passthrough=PULL_BASE_REF
               - .
-            env:
-              - name: GOOGLE_APPLICATION_CREDENTIALS
-                value: /creds/service-account.json
-            volumeMounts:
-              - name: creds
-                mountPath: /creds
-        volumes:
-          - name: creds
-            secret:
-              secretName: deployer-service-account
 ```
 
-[gcr instructions]: https://github.com/kubernetes/k8s.io/blob/master/k8s.gcr.io/README.md
+If you need the `.git` directory to be uploaded to your build environment:
+- pass the `--with-git-dir` command-line option to `run.sh`;
+- add an empty `.gcloudignore` file to your repository. This will override the
+  [default values][gcloudignore].
+
+[registry instructions]: https://github.com/kubernetes/k8s.io/blob/main/registry.k8s.io/README.md
 [gcb documentation]: https://cloud.google.com/cloud-build/docs/configuring-builds/create-basic-configuration
 [gcb-docker-gcloud]: https://github.com/kubernetes/test-infra/blob/master/images/gcb-docker-gcloud/Dockerfile
+[gcloudignore]: https://cloud.google.com/sdk/gcloud/reference/topic/gcloudignore
 [substitution docs]: https://cloud.google.com/cloud-build/docs/configuring-builds/substitute-variable-values#using_user-defined_substitutions

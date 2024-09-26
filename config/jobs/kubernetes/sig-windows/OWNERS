@@ -1,10 +1,17 @@
-approvers:
-- pjh
-- PatrickLang
-- michmike
-- benmoss
+reviewers:
 - ddebroy
-- yliaog
+- ibabou
+- jayunit100
+- jsturtevant
+- marosset
+approvers:
+- ddebroy
+- ibabou
+- jayunit100
+- jsturtevant
+- marosset
+emeritus_approvers:
+- chewong
 
 labels:
 - sig/windows

@@ -18,29 +18,19 @@ limitations under the License.
 package conformance
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"time"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/test-infra/kubetest/e2e"
-	"k8s.io/test-infra/kubetest/process"
 )
-
-// Tester runs conformance tests against a given cluster.
-type Tester struct {
-	kubecfg   string
-	ginkgo    string
-	e2etest   string
-	reportdir string
-	testArgs  *string
-	control   *process.Control
-}
 
 // BuildTester returns an object that knows how to test the cluster it deployed.
 func (d *Deployer) BuildTester(o *e2e.BuildTesterOptions) (e2e.Tester, error) {
@@ -61,7 +51,7 @@ func (d *Deployer) BuildTester(o *e2e.BuildTesterOptions) (e2e.Tester, error) {
 	t.Seed = 1436380640
 	t.GinkgoParallel = 10
 	t.Kubeconfig = d.kubecfg
-	t.FlakeAttempts = 2
+	t.FlakeAttempts = 1
 	t.NumNodes = 4
 	t.SystemdServices = []string{"docker", "kubelet"}
 	t.ReportDir = reportdir
@@ -112,7 +102,7 @@ func (d *Deployer) isAPIServerUp() (*v1.ComponentStatusList, error) {
 		return nil, fmt.Errorf("no apiserver client available")
 	}
 	//TODO(Q-Lee): check that relevant components have started. May consider checking addons.
-	return d.apiserver.CoreV1().ComponentStatuses().List(metav1.ListOptions{})
+	return d.apiserver.CoreV1().ComponentStatuses().List(context.TODO(), metav1.ListOptions{})
 }
 
 // DumpClusterLogs is a no-op.

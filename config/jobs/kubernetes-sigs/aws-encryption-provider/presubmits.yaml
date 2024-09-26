@@ -1,30 +1,43 @@
 presubmits:
   kubernetes-sigs/aws-encryption-provider:
   - name: pull-aws-encryption-provider-verify
+    cluster: eks-prow-build-cluster
     decorate: true
     always_run: true
     max_concurrency: 5
     spec:
       containers:
-      - image: golang:1.12
+      - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+        command:
+        - runner.sh
         args:
         - make
         - lint
         env:
         - name: GO111MODULE
           value: "on"
+        resources:
+          limits:
+            cpu: 2
+            memory: 4Gi
+          requests:
+            cpu: 2
+            memory: 4Gi
     annotations:
-      testgrid-dashboards: sig-aws-encryption-provider
-      testgrid-tab-name: verify
+      testgrid-dashboards: provider-aws-encryption-provider, amazon-ec2-presubmits
+      testgrid-tab-name: verify-enc
       description: aws-encryption-provider verification
       testgrid-num-columns-recent: '30'
   - name: pull-aws-encryption-provider-unittest
+    cluster: eks-prow-build-cluster
     decorate: true
     always_run: true
     max_concurrency: 5
     spec:
       containers:
-      - image: golang:1.12
+      - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+        command:
+        - runner.sh
         args:
         - make
         - test
@@ -33,8 +46,15 @@ presubmits:
         env:
         - name: GO111MODULE
           value: "on"
+        resources:
+          limits:
+            cpu: 2
+            memory: 4Gi
+          requests:
+            cpu: 2
+            memory: 4Gi
     annotations:
-      testgrid-dashboards: sig-aws-encryption-provider
-      testgrid-tab-name: unit-test
+      testgrid-dashboards: provider-aws-encryption-provider, amazon-ec2-presubmits
+      testgrid-tab-name: unit-enc-test
       description: aws-encryption-provider unit tests
       testgrid-num-columns-recent: '30'

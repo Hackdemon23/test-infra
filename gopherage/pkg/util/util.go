@@ -18,11 +18,11 @@ package util
 
 import (
 	"fmt"
-	"golang.org/x/tools/cover"
 	"io"
-	"io/ioutil"
-	"k8s.io/test-infra/gopherage/pkg/cov"
 	"os"
+
+	"golang.org/x/tools/cover"
+	"k8s.io/test-infra/gopherage/pkg/cov"
 )
 
 // DumpProfile dumps the profile to the given file destination.
@@ -34,14 +34,14 @@ func DumpProfile(destination string, profile []*cover.Profile) error {
 	} else {
 		f, err := os.Create(destination)
 		if err != nil {
-			return fmt.Errorf("failed to open %s: %v", destination, err)
+			return fmt.Errorf("failed to open %s: %w", destination, err)
 		}
 		defer f.Close()
 		output = f
 	}
 	err := cov.DumpProfile(profile, output)
 	if err != nil {
-		return fmt.Errorf("failed to dump profile: %v", err)
+		return fmt.Errorf("failed to dump profile: %w", err)
 	}
 	return nil
 }
@@ -54,14 +54,14 @@ func LoadProfile(origin string) ([]*cover.Profile, error) {
 		// Annoyingly, ParseProfiles only accepts a filename, so we have to write the bytes to disk
 		// so it can read them back.
 		// We could probably also just give it /dev/stdin, but that'll break on Windows.
-		tf, err := ioutil.TempFile("", "")
+		tf, err := os.CreateTemp("", "")
 		if err != nil {
-			return nil, fmt.Errorf("failed to create temp file: %v", err)
+			return nil, fmt.Errorf("failed to create temp file: %w", err)
 		}
 		defer tf.Close()
 		defer os.Remove(tf.Name())
 		if _, err := io.Copy(tf, os.Stdin); err != nil {
-			return nil, fmt.Errorf("failed to copy stdin to temp file: %v", err)
+			return nil, fmt.Errorf("failed to copy stdin to temp file: %w", err)
 		}
 		filename = tf.Name()
 	}

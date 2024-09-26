@@ -26,11 +26,11 @@ spec:
       restartPolicy: Never  # https://github.com/kubernetes/kubernetes/issues/54870
       containers:
       - name: label-sync
-        image: gcr.io/k8s-prow/label_sync:v20191219-b8438ff62
+        image: gcr.io/k8s-staging-test-infra/label_sync:v20240801-a5d9345e59
         args:
         - --config=/etc/config/labels.yaml
         - --confirm=true
-        - --orgs=kubernetes,kubernetes-client,kubernetes-csi,kubernetes-incubator,kubernetes-sigs
+        - --orgs=kubernetes,kubernetes-client,kubernetes-csi,kubernetes-sigs
         - --token=/etc/github/oauth
         volumeMounts:
         - name: oauth

@@ -1,11 +1,23 @@
 dashboard_groups:
-- name: provider-azure
-  dashboard_names:
-    - provider-azure-master
-    - provider-azure-on-call
-    - provider-azure-scalability
+  - name: provider-azure
+    dashboard_names:
+      - provider-azure-azuredisk-csi-driver
+      - provider-azure-azurefile-csi-driver
+      - provider-azure-blobfuse-csi-driver
+      - provider-azure-cloud-provider-azure
+      - provider-azure-cloud-provider-azure-1-28
+      - provider-azure-cloud-provider-azure-1-29
+      - provider-azure-cloud-provider-azure-1-30
+      - provider-azure-cloud-provider-azure-1-31
+      - provider-azure-presubmit
 
 dashboards:
-- name: provider-azure-master
-- name: provider-azure-on-call
-- name: provider-azure-scalability
+  - name: provider-azure-azuredisk-csi-driver
+  - name: provider-azure-azurefile-csi-driver
+  - name: provider-azure-blobfuse-csi-driver
+  - name: provider-azure-cloud-provider-azure
+  - name: provider-azure-cloud-provider-azure-1-28
+  - name: provider-azure-cloud-provider-azure-1-29
+  - name: provider-azure-cloud-provider-azure-1-30
+  - name: provider-azure-cloud-provider-azure-1-31
+  - name: provider-azure-presubmit

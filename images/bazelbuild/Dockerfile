@@ -13,6 +13,8 @@
 # limitations under the License.
 
 # Includes git, gcloud, and bazel.
+ARG OLD_BAZEL_VERSION
+FROM gcr.io/bazel-public/bazel:${OLD_BAZEL_VERSION} as old
 FROM ubuntu:18.04
 
 # add env we can debug with the image name:tag
@@ -27,17 +29,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     file \
     git \
     openssh-client \
-    python \
     python2.7 \
     python3 \
     python-pip \
+    python3-pip \
     rpm \
     unzip \
     wget \
     zip \
     zlib1g-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && python -m pip install --upgrade pip setuptools wheel
+    && pip install --no-cache-dir setuptools wheel \
+    && pip3 install --no-cache-dir setuptools wheel
 
 RUN wget -q https://dl.google.com/dl/cloudsdk/channels/rapid/google-cloud-sdk.tar.gz && \
     tar xf google-cloud-sdk.tar.gz && \
@@ -55,6 +58,11 @@ RUN INSTALLER="bazel-${BAZEL_VERSION}-installer-linux-x86_64.sh"; \
     DOWNLOAD_URL="https://github.com/bazelbuild/bazel/releases/download/${BAZEL_VERSION}/${INSTALLER}"; \
     wget -q "${DOWNLOAD_URL}" && \
     chmod +x "${INSTALLER}" && "./${INSTALLER}" && rm "${INSTALLER}"
+
+ARG OLD_BAZEL_VERSION
+COPY --from=old \
+    /usr/local/lib/bazel/bin/bazel-real /usr/local/lib/bazel/bin/bazel-${OLD_BAZEL_VERSION}
+
 
 WORKDIR /workspace
 COPY runner /usr/local/bin/

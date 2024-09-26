@@ -20,26 +20,40 @@ presubmits:
   google/cadvisor:
   - name: pull-cadvisor-e2e
     always_run: true
+    cluster: k8s-infra-prow-build
     labels:
       preset-service-account: "true"
       preset-k8s-ssh: "true"
+    decorate: true
+    decoration_config:
+      timeout: 90m
+    extra_refs:
+    - org: kubernetes
+      repo: kubernetes
+      base_ref: master
+      path_alias: k8s.io/kubernetes
+      workdir: true
+    - org: kubernetes
+      repo: test-infra
+      base_ref: master
+      path_alias: k8s.io/test-infra
     spec:
       containers:
-      - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+      - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+        resources:
+          limits:
+            cpu: 4
+            memory: 6Gi
+          requests:
+            cpu: 4
+            memory: 6Gi
+        command:
+          - runner.sh
+          - /workspace/scenarios/kubernetes_e2e.py
         args:
-        - "--job=$(JOB_NAME)"
-        - "--repo=k8s.io/kubernetes"
-        - "--repo=github.com/$(REPO_OWNER)/$(REPO_NAME)=$(PULL_REFS)"
-        - --root=/go/src
-        - --service-account=/etc/service-account/service-account.json
-        - --upload=gs://kubernetes-jenkins/pr-logs
-        - --timeout=90
-        - --scenario=kubernetes_e2e
-        - --
         - --deployment=node
-        - --gcp-project=cadvisor-e2e
         - --gcp-zone=us-central1-f
-        - --node-args=--image-config-file=/workspace/test-infra/jobs/e2e_node/image-config.yaml --test-suite=cadvisor
+        - --node-args=--image-config-file=/home/prow/go/src/k8s.io/test-infra/jobs/e2e_node/containerd/image-cadvisor.yaml --test-suite=cadvisor
         - --node-tests=true
         - --provider=gce
         - --test_args=--nodes=1
@@ -48,54 +62,48 @@ presubmits:
     annotations:
       testgrid-dashboards: presubmits-misc
       testgrid-tab-name: cadvisor
-periodics:
-- interval: 24h
-  name: ci-cadvisor-canarypush
-  labels:
-    preset-service-account: "true"
-    preset-cadvisor-docker-credential: "true"
-    preset-dind-enabled: "true"
-  spec:
-    containers:
-    - image: gcr.io/k8s-testimages/bootstrap:v20191203-6fb6647
-      args:
-      - --repo=github.com/google/cadvisor
-      - --root=/go/src
-      - --timeout=30
-      - --scenario=canarypush
-      - --
-      - --file=deploy/canary/Dockerfile
-      - --owner=stclair@google.com
-      - --target=google/cadvisor:canary
-      # docker-in-docker needs privileged mode
-      securityContext:
-        privileged: true
 
-  annotations:
-    testgrid-dashboards: sig-node-cadvisor
-    testgrid-tab-name: cadvisor-push
+periodics:
 - name: ci-cadvisor-e2e
   interval: 8h
+  cluster: k8s-infra-prow-build
   labels:
     preset-service-account: "true"
     preset-k8s-ssh: "true"
+  decorate: true
+  decoration_config:
+    timeout: 90m
+  extra_refs:
+    - org: kubernetes
+      repo: kubernetes
+      base_ref: master
+      path_alias: k8s.io/kubernetes
+      workdir: true
+    - org: kubernetes
+      repo: test-infra
+      base_ref: master
+      path_alias: k8s.io/test-infra
+    - org: google
+      repo: cadvisor
+      base_ref: master
+      path_alias: github.com/google/cadvisor
   spec:
     containers:
-    - image: gcr.io/k8s-testimages/kubekins-e2e:v20191221-fe232fc-master
+    - image: gcr.io/k8s-staging-test-infra/kubekins-e2e:v20240923-c8645c1a17-master
+      resources:
+        limits:
+          cpu: 4
+          memory: 6Gi
+        requests:
+          cpu: 4
+          memory: 6Gi
+      command:
+        - runner.sh
+        - /workspace/scenarios/kubernetes_e2e.py
       args:
-      - --job=$(JOB_NAME)
-      - --root=/go/src
-      - --repo=k8s.io/kubernetes
-      - --repo=github.com/google/cadvisor=master
-      - --service-account=/etc/service-account/service-account.json
-      - --timeout=90
-      - --upload=gs://kubernetes-jenkins/logs
-      - --scenario=kubernetes_e2e
-      - --
       - --deployment=node
-      - --gcp-project=ci-cadvisor-e2e
       - --gcp-zone=us-central1-f
-      - --node-args=--image-config-file=/workspace/test-infra/jobs/e2e_node/image-config.yaml --test-suite=cadvisor
+      - --node-args=--image-config-file=/home/prow/go/src/k8s.io/test-infra/jobs/e2e_node/containerd/image-cadvisor.yaml --test-suite=cadvisor
       - --node-tests=true
       - --provider=gce
       - --test_args=--nodes=1

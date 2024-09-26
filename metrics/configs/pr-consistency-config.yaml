@@ -30,7 +30,7 @@ query: |
           regexp_extract(metadata.value, r'^[^,]+,\d+:([^,"]+)') commit, /* git hash of pr */
           result,
           cast(date(started) as date) day
-        FROM [k8s-gubernator:build.all]
+        FROM [kubernetes-public:k8s_infra_kettle.all]
         where
           /* Select results that have occurred on or after the day of <LAST_DATA_TIME> (those results were
              for the day before), but don't include results from today, only return results for complete days. */
@@ -43,7 +43,6 @@ query: |
             'pr:pull-kubernetes-bazel-test',
             'pr:pull-kubernetes-e2e-gce',
             'pr:pull-kubernetes-e2e-gce-100-performance',
-            'pr:pull-kubernetes-e2e-kops-aws',
             'pr:pull-kubernetes-integration',
             'pr:pull-kubernetes-kubemark-e2e-gce-big',
             'pr:pull-kubernetes-node-e2e',
@@ -70,23 +69,3 @@ jqfilter: |
     consistent_runs: (.consistent_runs|tonumber),
     builds: (.builds|tonumber)
   })]
-
-measurements: 
-  backfill: pr_consistency
-  jq: |
-    [(.[] | {
-      measurement: "pr_consistency",
-      time: (.day|tonumber),
-      tags: {
-        day: (.day|tonumber)
-      },
-      fields: {
-        commit_consistency: (.commit_consistency|tonumber),
-        commits: (.commits|tonumber),
-        consistent_commits: (.consistent_commits|tonumber),
-        run_consistency: (.run_consistency|tonumber),
-        runs: (.runs|tonumber),
-        consistent_runs: (.consistent_runs|tonumber),
-        builds: (.builds|tonumber)
-      }
-    })]

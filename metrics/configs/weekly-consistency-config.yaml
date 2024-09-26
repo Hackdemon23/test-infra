@@ -30,7 +30,7 @@ query: |
           date(started) stamp,
           date(date_add(date(started), -dayofweek(started), "day")) wk, /* group by week */
           result
-        FROM [k8s-gubernator:build.all]
+        FROM [kubernetes-public:k8s_infra_kettle.all]
         where
           started > date_add(current_timestamp(), -90, "DAY")
           and version != "unknown"
@@ -40,7 +40,6 @@ query: |
             'pr:pull-kubernetes-bazel-test',
             'pr:pull-kubernetes-e2e-gce',
             'pr:pull-kubernetes-e2e-gce-100-performance',
-            'pr:pull-kubernetes-e2e-kops-aws',
             'pr:pull-kubernetes-integration',
             'pr:pull-kubernetes-kubemark-e2e-gce-big',
             'pr:pull-kubernetes-node-e2e',

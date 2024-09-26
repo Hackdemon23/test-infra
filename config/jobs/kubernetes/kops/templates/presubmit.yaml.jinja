@@ -1,0 +1,109 @@
+
+  - name: {{job_name}}
+    cluster: {{build_cluster}}
+    branches:
+    - {{branch}}
+    {%- if run_if_changed %}
+    run_if_changed: '{{run_if_changed}}'
+    {%- endif %}
+    always_run: {{always_run}}
+    optional: {{optional}}
+    skip_report: {{skip_report}}
+    labels:
+      {%- if cloud == "aws" %}
+      preset-service-account: "true"
+      preset-aws-ssh: "true"
+      {%- if not boskos_resource_type %}
+      preset-aws-credential: "true"
+      {%- endif %}
+      preset-dind-enabled: "true"
+      {%- else %}
+      preset-k8s-ssh: "true"
+      {%- endif %}
+    decorate: true
+    decoration_config:
+      timeout: {{job_timeout}}
+    path_alias: k8s.io/kops
+    spec:
+      {%- if cloud == "gce" %}
+      serviceAccountName: k8s-kops-test
+      {%- endif %}
+      containers:
+      - image: {{image}}
+        imagePullPolicy: Always
+        command:
+        - runner.sh
+        args:
+        - bash
+        - -c
+        - |
+            make test-e2e-install
+            kubetest2 kops \
+            -v 2 \
+            --up --build --down \
+            --cloud-provider={{cloud}} \
+            {%- if cloud == "gce" %}
+            --admin-access=0.0.0.0/0 \
+            {%- endif %}
+            --create-args="{{create_args}}" \
+            {%- if cluster_name %}
+            --cluster-name="{{ cluster_name }}" \
+            {%- endif %}
+            {%- if kops_feature_flags %}
+            --env=KOPS_FEATURE_FLAGS={{kops_feature_flags}} \
+            {%- endif %}
+            {%- if kubernetes_feature_gates %}
+            --kubernetes-feature-gates={{ kubernetes_feature_gates }} \
+            {%- endif %}
+            {%- if boskos_resource_type %}
+            --boskos-resource-type={{boskos_resource_type}} \
+            {%- endif %}
+            --kubernetes-version={{k8s_deploy_url}} \
+            --kops-binary-path=/home/prow/go/src/k8s.io/kops/.build/dist/linux/amd64/kops \
+            {%- if terraform_version %}
+            --terraform-version={{terraform_version}} \
+            {%- endif %}
+            {%- if template_path %}
+            --template-path={{template_path}} \
+            {%- endif %}
+            --test=kops \
+            -- \
+            {%- if test_args %}
+            --test-args="-test.timeout={{test_timeout}} {{ test_args }}" \
+            {%- else %}
+            --test-args="-test.timeout={{test_timeout}}" \
+            {%- endif %}
+            {%- if test_package_url %}
+            --test-package-url={{test_package_url}} \
+            {%- endif %}
+            {%- if test_package_dir %}
+            --test-package-dir={{test_package_dir}} \
+            {%- endif %}
+            --test-package-marker={{marker}} \
+            {%- if focus_regex %}
+            --focus-regex="{{focus_regex}}" \
+            {%- endif %}
+            {%- if skip_regex %}
+            --skip-regex="{{skip_regex}}" \
+            {%- endif %}
+            --parallel={{test_parallelism}}
+        securityContext:
+          privileged: true
+        env:
+        - name: KUBE_SSH_KEY_PATH
+          value: {{kops_ssh_key_path}}
+        - name: KUBE_SSH_USER
+          value: {{kops_ssh_user}}
+        - name: GOPATH
+          value: /home/prow/go
+        {%- for key, val in env.items() %}
+        - name: {{ key }}
+          value: "{{ val }}"
+        {%- endfor %}
+        resources:
+          limits:
+            cpu: "4"
+            memory: 6Gi
+          requests:
+            cpu: "4"
+            memory: 6Gi
